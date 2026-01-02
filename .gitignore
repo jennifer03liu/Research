@@ -1,0 +1,11 @@
+# Windows folder customisation file
+desktop.ini
+
+# Windows thumbnail cache files
+Thumbs.db
+Thumbs.db:encryptable
+
+# Files that might appear on Mac systems or external disks
+.DS_Store
+.Spotlight-V100
+.Trashes
