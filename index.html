@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>載入中...</title>
+    <title>正在處理中...</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
@@ -31,6 +31,7 @@
             align-items: center;
             height: 100%;
             text-align: center;
+            padding: 1rem;
         }
 
         .spinner {
@@ -57,26 +58,13 @@
         .loading-text p {
             margin: 0;
             padding: 0;
-            animation: fadeInOut 6s ease-in-out infinite;
-            position: absolute; /* Keep container size stable */
-            width: 100%;
-            left: 0;
         }
 
         .loading-text .lang-en {
-            animation-delay: 3s;
-            opacity: 0; /* Start hidden */
+            margin-top: 0.75rem;
+            font-size: 0.9rem;
+            opacity: 0.7;
         }
-
-
-        @keyframes fadeInOut {
-            0% { opacity: 0; }
-            15% { opacity: 1; }
-            50% { opacity: 1; }
-            65% { opacity: 0; }
-            100% { opacity: 0; }
-        }
-
     </style>
 </head>
 <body>
@@ -87,5 +75,53 @@
             <p class="lang-en">Redirecting to the survey, please wait...</p>
         </div>
     </div>
+
+    <script>
+        // ==========================================
+        // CONFIGURATION
+        // ==========================================
+        
+        // 1. GAS 後端網址 (請填入部署後的 Web App URL)
+        const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwkziN92AA0J4JX-lH2af8smTSJLDEqw_6f1fV8Bv3fe49Tmd3QpaqoZTf3ZqIUFzjc/exec"; 
+
+        // 2. Google Form 設定
+        const FORM_BASE_URL = "https://docs.google.com/forms/d/e/1FAIpQLScfi6G7InS212ZMIeu5Yx5rEO1OX0bWKGSZo-iVnm1OWQeCPQ/viewform";
+        const ENTRY_ID = "entry.701942597"; // 驗證碼欄位 ID
+
+        // ==========================================
+
+        function generateUUID() {
+            if (crypto && crypto.randomUUID) return crypto.randomUUID();
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        (async function() {
+            const uniqueId = generateUUID();
+            const finalUrl = `${FORM_BASE_URL}?usp=pp_url&${ENTRY_ID}=${uniqueId}`;
+
+            // 非同步寫入 Google Sheet (Fire-and-forget)
+            try {
+                // 檢查 GAS_API_URL 是否為預設或未設定值
+                if (GAS_API_URL && !GAS_API_URL.includes("AKfyc") && !GAS_API_URL.includes("你的ID")) {
+                     console.warn("GAS URL 似乎尚未設定，跳過寫入");
+                } else {
+                    fetch(GAS_API_URL, {
+                        method: 'POST',
+                        mode: 'no-cors', 
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code: uniqueId, timestamp: new Date().toISOString() })
+                    });
+                }
+            } catch (e) {
+                console.error("Logging to Google Sheet failed.", e);
+            }
+
+            // 立即執行跳轉
+            window.location.replace(finalUrl);
+        })();
+    </script>
 </body>
 </html>
