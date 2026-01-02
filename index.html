@@ -127,7 +127,7 @@
                         method: 'POST',
                         mode: 'no-cors', 
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ code: uniqueId, timestamp: new Date().toISOString() })
+                        body: JSON.stringify({ code: uniqueId, url: finalUrl, timestamp: new Date().toISOString() })
                     });
                 }
             } catch (e) {
