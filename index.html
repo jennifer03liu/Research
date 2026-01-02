@@ -1,87 +1,91 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="zh-Hant">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Redirecting...</title>
+    <title>載入中...</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        :root {
+            --background-color: #121826;
+            --text-color: #E2E8F0;
+            --spinner-track-color: #334155;
+            --spinner-color: #38BDF8;
+        }
+
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: 'Montserrat', 'Noto Sans TC', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            overflow: hidden;
+        }
+
+        .loading-container {
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            height: 100vh;
-            margin: 0;
-            background-color: #f8f9fa;
-            color: #555;
+            height: 100%;
+            text-align: center;
         }
-        .container { text-align: center; }
+
         .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
+            border: 6px solid var(--spinner-track-color);
+            border-top-color: var(--spinner-color);
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 15px auto;
+            width: 50px;
+            height: 50px;
+            animation: spin 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+            margin-bottom: 2.5rem;
         }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        p { font-size: 1.1rem; }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 1.125rem;
+            font-weight: 400;
+            letter-spacing: 0.5px;
+        }
+
+        .loading-text p {
+            margin: 0;
+            padding: 0;
+            animation: fadeInOut 6s ease-in-out infinite;
+            position: absolute; /* Keep container size stable */
+            width: 100%;
+            left: 0;
+        }
+
+        .loading-text .lang-en {
+            animation-delay: 3s;
+            opacity: 0; /* Start hidden */
+        }
+
+
+        @keyframes fadeInOut {
+            0% { opacity: 0; }
+            15% { opacity: 1; }
+            50% { opacity: 1; }
+            65% { opacity: 0; }
+            100% { opacity: 0; }
+        }
+
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="loading-container">
         <div class="spinner"></div>
-        <p>系統正在建立您的專屬連結並記錄資料，請稍候...</p>
+        <div class="loading-text">
+            <p class="lang-zh">正在跳轉至問卷，請稍候...</p>
+            <p class="lang-en">Redirecting to the survey, please wait...</p>
+        </div>
     </div>
-
-    <script>
-        // ==========================================
-        // CONFIGURATION
-        // ==========================================
-        
-        // 1. GAS 後端網址 (請填入部署後的 Web App URL)
-        const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwkziN92AA0J4JX-lH2af8smTSJLDEqw_6f1fV8Bv3fe49Tmd3QpaqoZTf3ZqIUFzjc/exec"; 
-
-        // 2. Google Form 設定
-        const FORM_BASE_URL = "https://docs.google.com/forms/d/e/1FAIpQLScfi6G7InS212ZMIeu5Yx5rEO1OX0bWKGSZo-iVnm1OWQeCPQ/viewform";
-        const ENTRY_ID = "entry.701942597"; // 驗證碼欄位 ID
-
-        // ==========================================
-
-        function generateUUID() {
-            if (crypto && crypto.randomUUID) return crypto.randomUUID();
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            });
-        }
-
-        (async function() {
-            const uniqueId = generateUUID();
-            const finalUrl = `${FORM_BASE_URL}?usp=pp_url&${ENTRY_ID}=${uniqueId}`;
-
-            // 非同步寫入 Google Sheet (Fire-and-forget)
-            // 使用 no-cors 模式避免瀏覽器跨域錯誤 (CORS error)
-            try {
-                // 檢查是否已設定 URL
-                if (!GAS_API_URL.includes("你的ID")) {
-                    await fetch(GAS_API_URL, {
-                        method: 'POST',
-                        mode: 'no-cors', 
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ code: uniqueId, url: finalUrl })
-                    });
-                } else {
-                    console.warn("GAS URL 尚未設定，跳過寫入");
-                }
-            } catch (e) {
-                console.error("Logging failed", e);
-            }
-
-            // 無論寫入成功與否，都執行跳轉
-            window.location.replace(finalUrl);
-        })();
-    </script>
 </body>
 </html>
