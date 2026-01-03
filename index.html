@@ -133,23 +133,23 @@
             sent = navigator.sendBeacon(GAS_API_URL, blob);
         }
 
-        // 如果 sendBeacon 失敗或是瀏覽器不支援，退回使用 fetch 並強制等待
+        // 如果 sendBeacon 失敗或是瀏覽器不支援，退回使用 fetch 並等待其完成
         if (!sent) {
             try {
                 await fetch(GAS_API_URL, {
                     method: 'POST',
-                    mode: 'no-cors',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
                     body: payload
                 });
             } catch (e) {
-                console.error("Fetch failed", e);
+                console.error("Fetch fallback failed", e);
             }
         }
 
-        // 強制停留 500 毫秒 (0.5秒)，給手機瀏覽器足夠時間處理封包
-        setTimeout(() => {
-            window.location.replace(finalUrl);
-        }, 500);
+        // 所有發送機制都完成後，再進行跳轉
+        window.location.replace(finalUrl);
     })();
     </script>
 </body>
