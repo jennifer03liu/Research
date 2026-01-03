@@ -127,6 +127,7 @@
                         method: 'POST',
                         mode: 'no-cors', 
                         headers: { 'Content-Type': 'application/json' },
+                        keepalive: true, // 重要：即使頁面跳轉也保持連線
                         body: JSON.stringify({ code: uniqueId, url: finalUrl, timestamp: new Date().toISOString() })
                     });
                 }
@@ -134,8 +135,10 @@
                 console.error("Logging to Google Sheet failed.", e);
             }
 
-            // 立即執行跳轉
-            window.location.replace(finalUrl);
+            // 稍微延遲 800ms 後執行跳轉，增加成功率 (特別針對 LINE 內建瀏覽器)
+            setTimeout(() => {
+                window.location.replace(finalUrl);
+            }, 800);
         })();
     </script>
 </body>
