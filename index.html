@@ -113,30 +113,44 @@
             });
         }
 
-        (async function() {
-            const uniqueId = generateUUID();
-            const finalUrl = `${FORM_BASE_URL}?usp=pp_url&${ENTRY_ID}=${uniqueId}`;
+    (async function() {
+        const uniqueId = generateUUID();
+        const finalUrl = `${FORM_BASE_URL}?usp=pp_url&${ENTRY_ID}=${uniqueId}`;
+        
+        // 準備要傳送的資料
+        const payload = JSON.stringify({ 
+            code: uniqueId, 
+            url: finalUrl, 
+            timestamp: new Date().toISOString() 
+        });
 
-            // 非同步寫入 Google Sheet (Fire-and-forget)
+        // 使用 sendBeacon 確保資料在背景能送出 (不受跳轉影響)
+        // 注意：sendBeacon 限制傳送內容格式，需轉為 Blob
+        const blob = new Blob([payload], { type: 'application/json' });
+        
+        let sent = false;
+        if (navigator.sendBeacon) {
+            sent = navigator.sendBeacon(GAS_API_URL, blob);
+        }
+
+        // 如果 sendBeacon 失敗或是瀏覽器不支援，退回使用 fetch 並強制等待
+        if (!sent) {
             try {
-                // 檢查 GAS_API_URL 是否為預設或未設定值
-                if (GAS_API_URL && !GAS_API_URL.includes("AKfyc") && !GAS_API_URL.includes("你的ID")) {
-                     console.warn("GAS URL 似乎尚未設定，跳過寫入");
-                } else {
-                    fetch(GAS_API_URL, {
-                        method: 'POST',
-                        mode: 'no-cors', 
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ code: uniqueId, url: finalUrl, timestamp: new Date().toISOString() })
-                    });
-                }
+                await fetch(GAS_API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    body: payload
+                });
             } catch (e) {
-                console.error("Logging to Google Sheet failed.", e);
+                console.error("Fetch failed", e);
             }
+        }
 
-            // 立即執行跳轉
+        // 強制停留 500 毫秒 (0.5秒)，給手機瀏覽器足夠時間處理封包
+        setTimeout(() => {
             window.location.replace(finalUrl);
-        })();
+        }, 500);
+    })();
     </script>
 </body>
 </html>
