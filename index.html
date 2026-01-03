@@ -113,40 +113,30 @@
             });
         }
 
-    (async function() {
-        const uniqueId = generateUUID();
-        const finalUrl = `${FORM_BASE_URL}?usp=pp_url&${ENTRY_ID}=${uniqueId}`;
-        
-        const payload = JSON.stringify({ 
-            code: uniqueId, 
-            url: finalUrl, 
-            timestamp: new Date().toISOString() 
-        });
+        (async function() {
+            const uniqueId = generateUUID();
+            const finalUrl = `${FORM_BASE_URL}?usp=pp_url&${ENTRY_ID}=${uniqueId}`;
 
-        // For modern browsers, sendBeacon is the most reliable way for page-exit events.
-        const blob = new Blob([payload], { type: 'application/json' });
-        if (navigator.sendBeacon && navigator.sendBeacon(GAS_API_URL, blob)) {
-            // sendBeacon initiated, we can navigate away immediately.
-            window.location.replace(finalUrl);
-        } else {
-            // For older browsers or if sendBeacon fails, fallback to fetch.
-            // We MUST wait for it to finish before navigating.
+            // 非同步寫入 Google Sheet (Fire-and-forget)
             try {
-                await fetch(GAS_API_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: payload,
-                    keepalive: true // Important hint for browsers to keep request alive on unload
-                });
-            } catch (error) {
-                console.error('Fetch fallback failed:', error);
-                // We still redirect even if logging fails, as filling the form is the user's priority.
-            } finally {
-                // This ensures redirection happens ONLY after the await fetch is complete (success or fail).
-                window.location.replace(finalUrl);
+                // 檢查 GAS_API_URL 是否為預設或未設定值
+                if (GAS_API_URL && !GAS_API_URL.includes("AKfyc") && !GAS_API_URL.includes("你的ID")) {
+                     console.warn("GAS URL 似乎尚未設定，跳過寫入");
+                } else {
+                    fetch(GAS_API_URL, {
+                        method: 'POST',
+                        mode: 'no-cors', 
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code: uniqueId, url: finalUrl, timestamp: new Date().toISOString() })
+                    });
+                }
+            } catch (e) {
+                console.error("Logging to Google Sheet failed.", e);
             }
-        }
-    })();
+
+            // 立即執行跳轉
+            window.location.replace(finalUrl);
+        })();
     </script>
 </body>
 </html>
