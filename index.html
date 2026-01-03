@@ -117,39 +117,35 @@
         const uniqueId = generateUUID();
         const finalUrl = `${FORM_BASE_URL}?usp=pp_url&${ENTRY_ID}=${uniqueId}`;
         
-        // 準備要傳送的資料
         const payload = JSON.stringify({ 
             code: uniqueId, 
             url: finalUrl, 
             timestamp: new Date().toISOString() 
         });
 
-        // 使用 sendBeacon 確保資料在背景能送出 (不受跳轉影響)
-        // 注意：sendBeacon 限制傳送內容格式，需轉為 Blob
+        // For modern browsers, sendBeacon is the most reliable way for page-exit events.
         const blob = new Blob([payload], { type: 'application/json' });
-        
-        let sent = false;
-        if (navigator.sendBeacon) {
-            sent = navigator.sendBeacon(GAS_API_URL, blob);
-        }
-
-        // 如果 sendBeacon 失敗或是瀏覽器不支援，退回使用 fetch 並等待其完成
-        if (!sent) {
+        if (navigator.sendBeacon && navigator.sendBeacon(GAS_API_URL, blob)) {
+            // sendBeacon initiated, we can navigate away immediately.
+            window.location.replace(finalUrl);
+        } else {
+            // For older browsers or if sendBeacon fails, fallback to fetch.
+            // We MUST wait for it to finish before navigating.
             try {
                 await fetch(GAS_API_URL, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: payload
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload,
+                    keepalive: true // Important hint for browsers to keep request alive on unload
                 });
-            } catch (e) {
-                console.error("Fetch fallback failed", e);
+            } catch (error) {
+                console.error('Fetch fallback failed:', error);
+                // We still redirect even if logging fails, as filling the form is the user's priority.
+            } finally {
+                // This ensures redirection happens ONLY after the await fetch is complete (success or fail).
+                window.location.replace(finalUrl);
             }
         }
-
-        // 所有發送機制都完成後，再進行跳轉
-        window.location.replace(finalUrl);
     })();
     </script>
 </body>
