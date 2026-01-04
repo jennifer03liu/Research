@@ -243,25 +243,30 @@ function cleanAndExportData() {
 
         if (allSame) continue; // 排除一本初衷
 
-        // Backgrounds
-        newRow.push(row[colGender]);
+        // Backgrounds Decoding
+        // Gender
+        newRow.push(encodeValue(row[colGender], ["男", "女", "其他"]));
+        // Age (keep raw if number)
         newRow.push(row[colAge]);
-        newRow.push(row[colEdu]);
-        newRow.push(row[colMarriage]);
+        // Education
+        newRow.push(encodeValue(row[colEdu], ["高中", "專科", "大學", "碩士", "博士"]));
+        // Marriage
+        newRow.push(encodeValue(row[colMarriage], ["未婚", "無子女", "有子女", "其他"]));
 
-        // Tenure Calc: Year * 12 + Month
-        // NowJob
+        // Tenure Calc
         var ny = Number(row[colNowJobY]) || 0;
         var nm = Number(row[colNowJobM]) || 0;
         newRow.push(ny * 12 + nm);
 
-        // TotalJob
         var ty = Number(row[colTotalJobY]) || 0;
         var tm = Number(row[colTotalJobM]) || 0;
         newRow.push(ty * 12 + tm);
 
-        newRow.push(row[colPos]);
-        newRow.push(row[colInd]);
+        // Position
+        newRow.push(encodeValue(row[colPos], ["一般", "基層", "中階", "高階"]));
+        // Industry
+        newRow.push(encodeValue(row[colInd], ["製造", "科技", "金融", "服務", "醫療", "教育", "公部門", "其他"]));
+        // OrgSize (Keep raw or need map? User didn't show image, keep raw)
         newRow.push(row[colSize]);
 
         cleanedData.push(newRow);
@@ -281,6 +286,22 @@ function cleanAndExportData() {
     }
 
     Browser.msgBox("SPSS 格式化完成！\n有效筆數: " + stats.valid);
+}
+
+/**
+ * 輔助編碼函式
+ * @param {string} val 原始值
+ * @param {Array} keywords 關鍵字陣列 (順序對應 1, 2, 3...)
+ * @return {number|string} 對應的代碼 (1-based) 或原始值(若無匹配)
+ */
+function encodeValue(val, keywords) {
+    var str = String(val);
+    for (var i = 0; i < keywords.length; i++) {
+        if (str.indexOf(keywords[i]) > -1) {
+            return i + 1;
+        }
+    }
+    return ""; // 若無匹配回傳空值，方便檢查
 }
 
 /**
