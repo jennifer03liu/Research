@@ -45,6 +45,9 @@ function cleanAndExportData() {
     var colAttn2 = findCol(headers, "這題請選擇「4」");
     var colJobStatus = findCol(headers, "就業狀態為何");
 
+    // Work Hours
+    var colWorkHours = findCol(headers, "每周平均工時");
+
     // PM 變數 (4題 + 1多選)
     var colPM_Has = findCol(headers, "是否有進行績效考核");
     var colPM_Form = findCol(headers, "績效考核」通常包含哪些形式"); // 多選
@@ -91,14 +94,15 @@ function cleanAndExportData() {
     // --- 設定新的標題列 (SPSS Format) ---
     var newHeaders = [
         "Timestamp",
+        "WorkHours", // 新增
         // PM
         "PM_Has",
         "PM_Form_Supervisor", "PM_Form_Self", "PM_Form_Interview", "PM_Form_Other", // 多選拆分
         "PM_Result", "PM_Help",
         // HCP (6 items)
-        "HCP1", "HCP2", "HCP3", "HCP4", "HCP5", "HCP6",
+        "HCP1", "HCP2", "HCP3", "HCP4", "HCP5_R", "HCP6_R", // 標記反向題 _R
         // JCP (6 items)
-        "JCP1", "JCP2", "JCP3", "JCP4", "JCP5", "JCP6",
+        "JCP1_R", "JCP2_R", "JCP3_R", "JCP4_R", "JCP5_R", "JCP6",
         // PP (6 items)
         "PP1", "PP2", "PP3", "PP4", "PP5", "PP6",
         // DP (5 items)
@@ -152,6 +156,12 @@ function cleanAndExportData() {
         // Timestamp
         newRow.push(row[colTimestamp]);
 
+        // Work Hours (Encoding: 1=40+, 0=<40)
+        var whVal = String(row[colWorkHours]);
+        if (whVal.indexOf("40 小時(含)以上") > -1) newRow.push(1);
+        else if (whVal.indexOf("未滿 40 小時") > -1) newRow.push(0);
+        else newRow.push(""); // Missing/Unknown
+
         // PM Section
         newRow.push(row[colPM_Has]);
 
@@ -172,16 +182,32 @@ function cleanAndExportData() {
         // Other: 其他
         newRow.push(pmVal.indexOf("其他") > -1 ? 1 : 0);
 
-        newRow.push(row[colPM_Result]);
+        // PM Result (Encoding: 3=Positive, 2=Neutral, 1=Negative)
+        var pmResVal = String(row[colPM_Result]);
+        if (pmResVal.indexOf("正向") > -1) newRow.push(3);
+        else if (pmResVal.indexOf("中性") > -1) newRow.push(2);
+        else if (pmResVal.indexOf("負向") > -1) newRow.push(1);
+        else newRow.push(""); // check if empty or N/A
+
         newRow.push(row[colPM_Help]);
 
         // Scales Extraction Helper
         var scaleValues = [];
 
         // HCP (6 items) from colCP_Start
-        for (var k = 0; k < 6; k++) scaleValues.push(row[colCP_Start + k]);
+        for (var k = 0; k < 6; k++) {
+            var val = row[colCP_Start + k];
+            // Reverse: HCP 5, 6 (Indices 4, 5)
+            if (k >= 4) val = reverseScore(val);
+            scaleValues.push(val);
+        }
         // JCP (6 items) follows HCP
-        for (var k = 0; k < 6; k++) scaleValues.push(row[colCP_Start + 6 + k]);
+        for (var k = 0; k < 6; k++) {
+            var val = row[colCP_Start + 6 + k];
+            // Reverse: JCP 1-5 (Indices 0-4)
+            if (k <= 4) val = reverseScore(val);
+            scaleValues.push(val);
+        }
         // PP (6 items)
         for (var k = 0; k < 6; k++) scaleValues.push(row[colPP_Start + k]);
         // DP (5 items)
@@ -251,8 +277,17 @@ function cleanAndExportData() {
     if (cleanedData.length > 0) {
         targetSheet.getRange(1, 1, cleanedData.length, cleanedData[0].length).setValues(cleanedData);
         targetSheet.setFrozenRows(1);
-        try { targetSheet.autoResizeColumns(1, 17); } catch (e) { }
+        try { targetSheet.autoResizeColumns(1, 15); } catch (e) { }
     }
 
     Browser.msgBox("SPSS 格式化完成！\n有效筆數: " + stats.valid);
+}
+
+/**
+ * 反向題處理 (5點量表：6 - X)
+ */
+function reverseScore(val) {
+    var num = Number(val);
+    if (isNaN(num) || val === "") return val; // 保持原樣 if invalid
+    return 6 - num;
 }
