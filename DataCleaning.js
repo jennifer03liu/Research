@@ -163,33 +163,37 @@ function cleanAndExportData() {
         else newRow.push(""); // Missing/Unknown
 
         // PM Section
-        newRow.push(row[colPM_Has]);
+        // Q1: 是否有進行績效考核 (是/都沒有)
+        var valPM = String(row[colPM_Has]);
+        var hasPM = valPM.indexOf("是") > -1;
+        newRow.push(hasPM ? 1 : 0); // Encode: 1=Yes, 0=No
 
-        // PM Multi-choice Split
-        // 選項關鍵字更新：
-        // 1. 主管評核
-        // 2. 員工自我評核
-        // 3. 績效面談
-        // 4. 其他
-        var pmVal = String(row[colPM_Form]);
+        if (!hasPM) {
+            // 若無考核，後續題目應為跳題 (System Missing)
+            // 填入空白，而非 0
+            newRow.push(""); // Supervisor
+            newRow.push(""); // Self
+            newRow.push(""); // Interview
+            newRow.push(""); // Other
+            newRow.push(""); // Result
+            newRow.push(""); // Help
+        } else {
+            // PM Multi-choice Split
+            var pmVal = String(row[colPM_Form]);
+            newRow.push(pmVal.indexOf("主管評核") > -1 ? 1 : 0);
+            newRow.push(pmVal.indexOf("員工自我評核") > -1 || pmVal.indexOf("自評") > -1 ? 1 : 0);
+            newRow.push(pmVal.indexOf("績效面談") > -1 ? 1 : 0);
+            newRow.push(pmVal.indexOf("其他") > -1 ? 1 : 0);
 
-        // Type1: 主管評核
-        newRow.push(pmVal.indexOf("主管評核") > -1 ? 1 : 0);
-        // Type2: 員工自我評核
-        newRow.push(pmVal.indexOf("員工自我評核") > -1 || pmVal.indexOf("自評") > -1 ? 1 : 0);
-        // Type3: 績效面談
-        newRow.push(pmVal.indexOf("績效面談") > -1 ? 1 : 0);
-        // Other: 其他
-        newRow.push(pmVal.indexOf("其他") > -1 ? 1 : 0);
+            // PM Result
+            var pmResVal = String(row[colPM_Result]);
+            if (pmResVal.indexOf("正向") > -1) newRow.push(3);
+            else if (pmResVal.indexOf("中性") > -1) newRow.push(2);
+            else if (pmResVal.indexOf("負向") > -1) newRow.push(1);
+            else newRow.push(""); // Missing
 
-        // PM Result (Encoding: 3=Positive, 2=Neutral, 1=Negative)
-        var pmResVal = String(row[colPM_Result]);
-        if (pmResVal.indexOf("正向") > -1) newRow.push(3);
-        else if (pmResVal.indexOf("中性") > -1) newRow.push(2);
-        else if (pmResVal.indexOf("負向") > -1) newRow.push(1);
-        else newRow.push(""); // check if empty or N/A
-
-        newRow.push(row[colPM_Help]);
+            newRow.push(row[colPM_Help]);
+        }
 
         // Scales Extraction Helper
         var scaleValues = [];
@@ -266,8 +270,8 @@ function cleanAndExportData() {
         newRow.push(encodeValue(row[colPos], ["一般", "基層", "中階", "高階"]));
         // Industry
         newRow.push(encodeValue(row[colInd], ["製造", "科技", "金融", "服務", "醫療", "教育", "公部門", "其他"]));
-        // OrgSize (Keep raw or need map? User didn't show image, keep raw)
-        newRow.push(row[colSize]);
+        // OrgSize
+        newRow.push(encodeValue(row[colSize], ["30", "31", "101", "501", "1001"]));
 
         cleanedData.push(newRow);
         stats.valid++;
