@@ -48,6 +48,9 @@ function cleanAndExportData() {
     // Work Hours
     var colWorkHours = findCol(headers, "每周平均工時");
 
+    // Matching ID (Birthday + Phone)
+    var colMatch = findCol(headers, "手機末3碼");
+
     // PM 變數 (4題 + 1多選)
     var colPM_Has = findCol(headers, "是否有進行績效考核");
     var colPM_Form = findCol(headers, "績效考核」通常包含哪些形式"); // 多選
@@ -94,13 +97,14 @@ function cleanAndExportData() {
     // --- 設定新的標題列 (SPSS Format) ---
     var newHeaders = [
         "Timestamp",
+        "Match_ID", // Add Matching ID
         "WorkHours", // 新增
         // PM
         "PM_Has",
         "PM_Form_Supervisor", "PM_Form_Self", "PM_Form_Interview", "PM_Form_Other", // 多選拆分
         "PM_Result", "PM_Help",
         // HCP (6 items)
-        "HCP1", "HCP2", "HCP3", "HCP4", "HCP5_R", "HCP6_R", // 標記反向題 _R
+        "HCP1", "HCP2", "HCP3", "HCP4_R", "HCP5", "HCP6_R", // 修正：HCP4, 6 反向
         // JCP (6 items)
         "JCP1_R", "JCP2_R", "JCP3_R", "JCP4_R", "JCP5_R", "JCP6",
         // PP (6 items)
@@ -156,6 +160,9 @@ function cleanAndExportData() {
         // Timestamp
         newRow.push(row[colTimestamp]);
 
+        // Match ID
+        newRow.push(row[colMatch]);
+
         // Work Hours (Encoding: 1=40+, 0=<40)
         var whVal = String(row[colWorkHours]);
         if (whVal.indexOf("40 小時(含)以上") > -1) newRow.push(1);
@@ -201,8 +208,8 @@ function cleanAndExportData() {
         // HCP (6 items) from colCP_Start
         for (var k = 0; k < 6; k++) {
             var val = row[colCP_Start + k];
-            // Reverse: HCP 5, 6 (Indices 4, 5)
-            if (k >= 4) val = reverseScore(val);
+            // Reverse: HCP 4, 6 (Indices 3, 5)
+            if (k === 3 || k === 5) val = reverseScore(val);
             scaleValues.push(val);
         }
         // JCP (6 items) follows HCP
