@@ -9,7 +9,8 @@ function doPost(e) {
     var sheet = ss.getSheetByName('受試者名單');
     
     var data = JSON.parse(e.postData.contents);
-    sheet.appendRow([new Date(), "", data.code, data.url]);
+    // Modified to match remote column structure: [Date, Empty, Empty, Code, Url]
+    sheet.appendRow([new Date(), "", "", data.code, data.url]);
     
     return ContentService.createTextOutput("Success");
   } catch (error) {
