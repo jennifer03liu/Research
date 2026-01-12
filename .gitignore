@@ -1,0 +1,17 @@
+# Data files
+*.csv
+*.sav
+*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+
+# R
+.Rhistory
+.RData
+*.Rproj
+
+# System
+.DS_Store
+Thumbs.db
