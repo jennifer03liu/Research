@@ -60,8 +60,8 @@ function cleanAndExportData() {
     // 量表變數
     // 假設題目順序是固定的，捕捉每個區塊的第一題
 
-    // CP (12題): 1-6 HCP, 7-12 JCP
-    // Q1: 晉升的可能性, Q7: 感到有挑戰性 (HCP 完接 JCP)
+    // CP (12題): 1-6 HP, 7-12 JCP
+    // Q1: 晉升的可能性, Q7: 感到有挑戰性 (HP 完接 JCP)
     var colCP_Start = findCol(headers, "晉升的可能性是有限的");
 
     // PP (6題)
@@ -103,8 +103,8 @@ function cleanAndExportData() {
         "PM_Has",
         "PM_Form_Supervisor", "PM_Form_Self", "PM_Form_Interview", "PM_Form_Other", // 多選拆分
         "PM_Result", "PM_Help",
-        // HCP (6 items)
-        "HCP1", "HCP2", "HCP3", "HCP4_R", "HCP5", "HCP6_R", // 修正：HCP4, 6 反向
+        // HP (6 items)
+        "HP1", "HP2", "HP3", "HP4_R", "HP5", "HP6_R", // 修正：HP4, 6 反向
         // JCP (6 items)
         "JCP1_R", "JCP2_R", "JCP3_R", "JCP4_R", "JCP5_R", "JCP6",
         // PP (6 items)
@@ -130,8 +130,8 @@ function cleanAndExportData() {
     yesterday.setDate(todayStart.getDate() - 1);
     var dateString = ('0' + (yesterday.getMonth() + 1)).slice(-2) + ('0' + yesterday.getDate()).slice(-2);
 
-    var stats = { 
-        total: 0, 
+    var stats = {
+        total: 0,
         valid: 0,
         invalid_date: 0,
         invalid_attn1: 0,
@@ -219,17 +219,17 @@ function cleanAndExportData() {
             else if (pmResVal.indexOf("中性") > -1) newRow.push(2);
             else if (pmResVal.indexOf("負向") > -1) newRow.push(1);
             else newRow.push(""); // Missing
-            
+
             newRow.push(row[colPM_Help]);
         }
 
         // Scales Extraction Helper
         var scaleValues = [];
 
-        // HCP (6 items) from colCP_Start
+        // HP (6 items) from colCP_Start
         for (var k = 0; k < 6; k++) {
             var val = row[colCP_Start + k];
-            // Reverse: HCP 4, 6 (Indices 3, 5)
+            // Reverse: HP 4, 6 (Indices 3, 5)
             if (k === 3 || k === 5) val = reverseScore(val);
             scaleValues.push(val);
         }
@@ -309,7 +309,7 @@ function cleanAndExportData() {
     }
 
     // --- Export ---
-    var targetSheetName = STAGE_PREFIX + "_" + dateString + "_" + stats.valid + "_SPSS";
+    var targetSheetName = STAGE_PREFIX + "_" + dateString + "_" + stats.valid;
     var targetSheet = ss.getSheetByName(targetSheetName);
     if (targetSheet) ss.deleteSheet(targetSheet);
     targetSheet = ss.insertSheet(targetSheetName);
@@ -321,16 +321,16 @@ function cleanAndExportData() {
     }
 
     var report = "處理完成！\\n" +
-                 "總樣本數: " + stats.total + "\\n" +
-                 "--------------------\\n" +
-                 "[排除統計]\\n" +
-                 "- 日期非作答區間: " + stats.invalid_date + "\\n" +
-                 "- 第一題檢核失敗(共需填寫幾次): " + stats.invalid_attn1 + "\\n" +
-                 "- 注意力檢測失敗(此題請選4): " + stats.invalid_attn2 + "\\n" +
-                 "- 就業狀態不符(非正職): " + stats.invalid_job + "\\n" +
-                 "- 填答傾向一致(一本初衷): " + stats.straight_lining + "\\n" +
-                 "--------------------\\n" +
-                 "有效樣本數: " + stats.valid;
+        "總樣本數: " + stats.total + "\\n" +
+        "--------------------\\n" +
+        "[排除統計]\\n" +
+        "- 日期非作答區間: " + stats.invalid_date + "\\n" +
+        "- 第一題檢核失敗(共需填寫幾次): " + stats.invalid_attn1 + "\\n" +
+        "- 注意力檢測失敗(此題請選4): " + stats.invalid_attn2 + "\\n" +
+        "- 就業狀態不符(非正職): " + stats.invalid_job + "\\n" +
+        "- 填答傾向一致(一本初衷): " + stats.straight_lining + "\\n" +
+        "--------------------\\n" +
+        "有效樣本數: " + stats.valid;
 
     Browser.msgBox(report);
 }
