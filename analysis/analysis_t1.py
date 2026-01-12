@@ -35,20 +35,29 @@ def get_significance_stars(p_value):
 def calculate_ave_cr(loadings):
     """
     Calculates AVE and CR from factor loadings.
+    Prioritizes 'Est. Std' (Standardized Estimates) if available.
     """
     results = []
     if loadings.empty: return pd.DataFrame()
 
+    # Determine which column to use for loadings
+    col_name = 'Est. Std' if 'Est. Std' in loadings.columns else 'Estimate'
+    
     factors = loadings['lval'].unique()
     
     for factor in factors:
-        factor_loadings = loadings[loadings['lval'] == factor]['Estimate']
+        # Filter for the specific factor
+        factor_loadings = loadings[loadings['lval'] == factor][col_name]
+        
+        # Ensure we are working with floats
+        factor_loadings = pd.to_numeric(factor_loadings, errors='coerce')
         
         lam_sq = factor_loadings ** 2
         sum_lam_sq = lam_sq.sum()
         sum_lam = factor_loadings.sum()
         
         # Error Variance (Standardized assumption: 1 - lam^2)
+        # Clip loadings to 0.99 to avoid negative error variance if model is crazy
         clamped_loadings = factor_loadings.clip(upper=0.99)
         error_var = 1 - (clamped_loadings ** 2)
         sum_error = error_var.sum()
@@ -91,15 +100,27 @@ def save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, error_
             f.write(cfa_fit.to_markdown(index=False))
         else:
             f.write("(No Data)\n")
-
         f.write("\n\n")
         
-        f.write("## Table 4. Factor Loadings\n")
+        f.write("## Table 4. Factor Loadings (Standardized)\n")
         if not cfa_loadings.empty:
             loadings = cfa_loadings[cfa_loadings['op'] == '=~'].copy()
-            loadings = loadings[['lval', 'rval', 'Estimate', 'p-value', 'Std. Err']]
-            loadings['Estimate'] = loadings['Estimate'].apply(lambda x: round(x, 3))
-            loadings['p-value'] = loadings['p-value'].apply(lambda x: round(x, 3))
+            
+            # Select appropriate columns for display
+            display_cols = ['lval', 'rval', 'Estimate', 'p-value', 'Std. Err']
+            if 'Est. Std' in loadings.columns:
+                display_cols = ['lval', 'rval', 'Est. Std', 'p-value', 'Std. Err']
+            
+            # Filter existing columns only
+            display_cols = [c for c in display_cols if c in loadings.columns]
+            
+            loadings = loadings[display_cols]
+            
+            # Round numeric columns
+            for col in ['Estimate', 'Est. Std', 'p-value', 'Std. Err']:
+                if col in loadings.columns:
+                     loadings[col] = pd.to_numeric(loadings[col], errors='coerce').apply(lambda x: round(x, 3) if pd.notnull(x) else "")
+
             f.write(loadings.to_markdown(index=False))
         else:
             f.write("(No Data)\n")
@@ -111,6 +132,7 @@ def save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, error_
         else:
             f.write("(No Data)\n")
         f.write("\n\n")
+
         
     print(f"Report saved to {filename}")
 
