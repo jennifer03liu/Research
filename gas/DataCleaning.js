@@ -130,7 +130,15 @@ function cleanAndExportData() {
     yesterday.setDate(todayStart.getDate() - 1);
     var dateString = ('0' + (yesterday.getMonth() + 1)).slice(-2) + ('0' + yesterday.getDate()).slice(-2);
 
-    var stats = { total: 0, valid: 0 };
+    var stats = { 
+        total: 0, 
+        valid: 0,
+        invalid_date: 0,
+        invalid_attn1: 0,
+        invalid_attn2: 0,
+        invalid_job: 0,
+        straight_lining: 0
+    };
     var invalidJobs = ["兼職", "待業", "學生", "自由", "自營"];
 
     // --- 逐行處理 ---
@@ -140,16 +148,29 @@ function cleanAndExportData() {
 
         // 1. 日期過濾 (只收昨日以前)
         var ts = new Date(row[colTimestamp]);
-        if (ts >= todayStart) continue;
+        if (ts >= todayStart) {
+            stats.invalid_date++;
+            continue;
+        }
 
         // 2. 注意力檢核
         // Attn1 必須是 '3次'
+        if (String(row[colAttn1]).trim() !== '3次') {
+            stats.invalid_attn1++;
+            continue;
+        }
         // Attn2 必須是 '4'
-        if (String(row[colAttn1]).trim() !== '3次' || String(row[colAttn2]).trim() !== '4') continue;
+        if (String(row[colAttn2]).trim() !== '4') {
+            stats.invalid_attn2++;
+            continue;
+        }
 
         // 3. 就業狀態
         var job = String(row[colJobStatus]);
-        if (invalidJobs.some(function (k) { return job.indexOf(k) > -1; })) continue;
+        if (invalidJobs.some(function (k) { return job.indexOf(k) > -1; })) {
+            stats.invalid_job++;
+            continue;
+        }
 
         // 4. 一本初衷 (檢查 CP, PP, DP, CI 範圍) & 數值轉換
         // 為了效能，我們在提取數據時順便檢查
@@ -198,7 +219,7 @@ function cleanAndExportData() {
             else if (pmResVal.indexOf("中性") > -1) newRow.push(2);
             else if (pmResVal.indexOf("負向") > -1) newRow.push(1);
             else newRow.push(""); // Missing
-
+            
             newRow.push(row[colPM_Help]);
         }
 
@@ -252,7 +273,10 @@ function cleanAndExportData() {
             else if (num !== firstVal) allSame = false;
         }
 
-        if (allSame) continue; // 排除一本初衷
+        if (allSame) {
+            stats.straight_lining++;
+            continue; // 排除一本初衷
+        }
 
         // Backgrounds Decoding
         // Gender
@@ -296,7 +320,19 @@ function cleanAndExportData() {
         try { targetSheet.autoResizeColumns(1, 15); } catch (e) { }
     }
 
-    Browser.msgBox("SPSS 格式化完成！\n有效筆數: " + stats.valid);
+    var report = "處理完成！\\n" +
+                 "總樣本數: " + stats.total + "\\n" +
+                 "--------------------\\n" +
+                 "[排除統計]\\n" +
+                 "- 日期非作答區間: " + stats.invalid_date + "\\n" +
+                 "- 第一題檢核失敗(共需填寫幾次): " + stats.invalid_attn1 + "\\n" +
+                 "- 注意力檢測失敗(此題請選4): " + stats.invalid_attn2 + "\\n" +
+                 "- 就業狀態不符(非正職): " + stats.invalid_job + "\\n" +
+                 "- 填答傾向一致(一本初衷): " + stats.straight_lining + "\\n" +
+                 "--------------------\\n" +
+                 "有效樣本數: " + stats.valid;
+
+    Browser.msgBox(report);
 }
 
 /**
