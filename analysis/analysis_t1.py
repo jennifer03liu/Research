@@ -4,9 +4,6 @@ import numpy as np
 import os
 import glob
 from scipy.stats import pearsonr
-from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # ==========================================
 # 0. Helper Functions
@@ -38,39 +35,25 @@ def get_significance_stars(p_value):
 def calculate_ave_cr(loadings):
     """
     Calculates AVE and CR from factor loadings.
-    Formula:
-    AVE = (sum(lambda^2)) / (sum(lambda^2) + sum(error_var))
-    CR = (sum(lambda)^2) / ((sum(lambda)^2) + sum(error_var))
-    
-    Note: For simplicity, we assume standardized loadings or approximate using estimates.
-    If 'Std. Estimate' is available effectively, use it. Here we use 'Estimate'.
-    We assume Error Variance = 1 - Loading^2 (Standardized assumption).
     """
     results = []
-    # Group by Latent Variable (lval)
+    if loadings.empty: return pd.DataFrame()
+
     factors = loadings['lval'].unique()
     
     for factor in factors:
         factor_loadings = loadings[loadings['lval'] == factor]['Estimate']
         
-        # Calculate Lambda Squared
         lam_sq = factor_loadings ** 2
         sum_lam_sq = lam_sq.sum()
-        
-        # Calculate Sum of Lambda (for CR)
         sum_lam = factor_loadings.sum()
         
-        # Calculate Error Variance (assuming standardized: 1 - lam^2)
-        # Using 1 - lam^2 ensures we don't get negative errors if loading > 1 (which shouldn't happen in std)
-        # We clamp loading to 0.99 to avoid div by zero or negative
+        # Error Variance (Standardized assumption: 1 - lam^2)
         clamped_loadings = factor_loadings.clip(upper=0.99)
         error_var = 1 - (clamped_loadings ** 2)
         sum_error = error_var.sum()
         
-        # AVE
         ave = sum_lam_sq / (sum_lam_sq + sum_error)
-        
-        # CR
         cr = (sum_lam ** 2) / ((sum_lam ** 2) + sum_error)
         
         results.append({
@@ -82,62 +65,120 @@ def calculate_ave_cr(loadings):
         
     return pd.DataFrame(results)
 
-def save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, filename="Research_Result.docx"):
-    print(f"\nGenerating Word Report: {filename}...")
-    doc = Document()
+def save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, filename="Research_Result.md"):
+    print(f"\nGenerating Markdown Report: {filename}...")
     
-    # Title
-    head = doc.add_heading('Research Analysis Report', 0)
-    head.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    def add_table_to_doc(df, title):
-        doc.add_heading(title, level=2)
-        # Create table
-        table = doc.add_table(rows=1, cols=len(df.columns))
-        table.style = 'Table Grid'
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write("# Research Analysis Report\n\n")
         
-        # Header
-        hdr_cells = table.rows[0].cells
-        for i, col_name in enumerate(df.columns):
-            hdr_cells[i].text = str(col_name)
-            
-        # Body
-        for index, row in df.iterrows():
-            row_cells = table.add_row().cells
-            for i, val in enumerate(row):
-                # FIX: Handle NaN/None to prevent Word corruption
-                text_val = str(val) if pd.notna(val) else ""
-                row_cells[i].text = text_val
+        f.write("## Table 1. Descriptive Statistics and Reliability\n")
+        f.write(stats_df.to_markdown(index=False))
+        f.write("\n\n")
         
-        doc.add_paragraph("\n")
+        f.write("## Table 2. Correlation Matrix\n")
+        f.write(corr_df.to_markdown(index=False))
+        f.write("\n\n")
+        
+        f.write("## Table 3. Model Fit Indices\n")
+        fit_cols = ['RMSEA', 'CFI', 'TLI', 'chi2', 'chi2 p-value', 'DoF']
+        existing_cols = [c for c in fit_cols if c in cfa_fit.columns]
+        f.write(cfa_fit[existing_cols].to_markdown(index=False))
+        f.write("\n\n")
+        
+        f.write("## Table 4. Factor Loadings\n")
+        loadings = cfa_loadings[cfa_loadings['op'] == '=~'].copy()
+        loadings = loadings[['lval', 'rval', 'Estimate', 'p-value', 'Std. Err']]
+        # Rounding for display
+        loadings['Estimate'] = loadings['Estimate'].apply(lambda x: round(x, 3))
+        loadings['p-value'] = loadings['p-value'].apply(lambda x: round(x, 3))
+        f.write(loadings.to_markdown(index=False))
+        f.write("\n\n")
 
-    # 1. Descriptive & Reliability
-    add_table_to_doc(stats_df, "Table 1. Descriptive Statistics and Reliability")
-
-    # 2. Correlation Matrix
-    add_table_to_doc(corr_df, "Table 2. Correlation Matrix")
-
-    # 3. Model Fit
-    fit_cols = ['RMSEA', 'CFI', 'TLI', 'chi2', 'chi2 p-value', 'DoF']
-    existing_cols = [c for c in fit_cols if c in cfa_fit.columns]
-    fit_summary = cfa_fit[existing_cols]
-    add_table_to_doc(fit_summary, "Table 3. Model Fit Indices")
-
-    # 4. Factor Loadings
-    loadings = cfa_loadings[cfa_loadings['op'] == '=~'].copy()
-    loadings = loadings[['lval', 'rval', 'Estimate', 'p-value', 'Std. Err']]
-    loadings['Estimate'] = loadings['Estimate'].apply(lambda x: round(x, 3))
-    loadings['p-value'] = loadings['p-value'].apply(lambda x: round(x, 3))
-    # Check for non-numeric Std Err
-    loadings['Std. Err'] = loadings['Std. Err'].apply(lambda x: round(x, 3) if isinstance(x, (int, float)) and pd.notna(x) else '-')
-    
-    add_table_to_doc(loadings, "Table 4. Factor Loadings")
-
-    # 5. Validity (CR & AVE)
-    add_table_to_doc(ave_cr_df, "Table 5. Convergent Validity (CR & AVE)")
-
-    doc.save(filename)
+        f.write("## Table 5. Convergent Validity (CR & AVE)\n")
+        f.write(ave_cr_df.to_markdown(index=False))
+        f.write("\n\n")
+        
     print(f"Report saved to {filename}")
+
+def generate_syntax_files(scale_items):
+    print("\nGenerating Syntax Files...")
+    
+    # 1. SPSS Syntax (.sps)
+    with open("Syntax_SPSS.sps", "w", encoding='utf-8') as f:
+        f.write("* SPSS Syntax generated by Analysis Script.\n\n")
+        
+        # Reliability
+        for scale, items in scale_items.items():
+            item_str = " ".join(items)
+            f.write(f"* Reliability for {scale}.\n")
+            f.write(f"RELIABILITY\n  /VARIABLES={item_str}\n  /SCALE('ALL VARIABLES') ALL\n  /MODEL=ALPHA.\n\n")
+        
+        # Correlation
+        # Assuming scale scores are calculated named as 'HCP', 'JCP' etc in SPSS dataset
+        scales = list(scale_items.keys())
+        scale_str = " ".join(scales)
+        f.write("* Correlation Analysis.\n")
+        f.write("* Note: You must calculate scale means first in SPSS.\n")
+        f.write(f"CORRELATIONS\n  /VARIABLES={scale_str}\n  /PRINT=TWOTAIL NOSIG\n  /MISSING=PAIRWISE.\n")
+        
+    print("Saved Syntax_SPSS.sps")
+
+    # 2. Mplus Syntax (.inp)
+    with open("Syntax_Mplus.inp", "w", encoding='utf-8') as f:
+        f.write("TITLE: CFA Analysis T1;\n")
+        f.write("DATA: FILE IS data.dat;\n")
+        f.write("VARIABLE:\n")
+        
+        all_items = []
+        for items in scale_items.values():
+            all_items.extend(items)
+        
+        # Wrapping names for Mplus (max 90 chars per line roughly)
+        names_str = "  NAMES ARE\n" 
+        chunk = ""
+        for item in all_items:
+            if len(chunk) > 60:
+                names_str += "    " + chunk + "\n"
+                chunk = ""
+            chunk += item + " "
+        names_str += "    " + chunk + ";\n"
+        
+        f.write(names_str)
+        f.write("  USEVARIABLES ARE ALL;\n\n")
+        
+        f.write("MODEL:\n")
+        for scale, items in scale_items.items():
+            # Mplus: Scale BY Item1 Item2 ...;
+            item_str = " ".join(items)
+            f.write(f"  {scale} BY {item_str};\n")
+            
+        f.write("\nOUTPUT: SAMPSTAT STANDARDIZED MODINDICES;\n")
+        
+    print("Saved Syntax_Mplus.inp")
+
+    # 3. R Syntax (lavaan)
+    with open("Syntax_R.R", "w", encoding='utf-8') as f:
+        f.write("# R Syntax using lavaan package\n")
+        f.write("library(lavaan)\n\n")
+        f.write("# 1. Load Data\n")
+        f.write("data <- read.csv('T1_data.csv') # Replace with your filename\n\n")
+        
+        f.write("# 2. Define Model\n")
+        f.write("model <- '\n")
+        for scale, items in scale_items.items():
+            # lavaan: Scale =~ Item1 + Item2 ...
+            item_str = " + ".join(items)
+            f.write(f"  {scale} =~ {item_str}\n")
+        f.write("'\n\n")
+        
+        f.write("# 3. Fit Model\n")
+        f.write("fit <- cfa(model, data=data)\n\n")
+        f.write("# 4. Summary & Fit Indices\n")
+        f.write("summary(fit, fit.measures=TRUE, standardized=TRUE)\n")
+        f.write("fitMeasures(fit, c('cfi', 'tli', 'rmsea', 'srmr'))\n")
+        
+    print("Saved Syntax_R.R")
+
 
 # ==========================================
 # 1. Load Data
@@ -235,14 +276,13 @@ model_desc = """
 print("\nRunning CFA Model...")
 cfa_loadings = pd.DataFrame()
 cfa_fit = pd.DataFrame()
-ave_cr_df = pd.DataFrame() # Empty default
+ave_cr_df = pd.DataFrame() 
 
 try:
     model = semopy.Model(model_desc)
     model.fit(data)
     
-    # Use std_est=True if available for better AVE/CR, else normal Estimate
-    # semopy 2.0+ might support it. Using try-except to be safe
+    # Try getting standardized estimates
     try:
         cfa_loadings = model.inspect(std_est=True)
     except:
@@ -254,8 +294,7 @@ try:
     print("\n--- Model Fit Indices ---")
     print(cfa_fit) 
     
-    # Calculate Validity
-    # Filter only measurement part for AVE/CR
+    # Calculate Validity (AVE/CR)
     measurement_loadings = cfa_loadings[cfa_loadings['op'] == '=~']
     ave_cr_df = calculate_ave_cr(measurement_loadings)
     print("\n--- Convergent Validity (CR & AVE) ---")
@@ -267,5 +306,11 @@ try:
 except Exception as e:
     print(f"\nError running model: {e}")
 
-# EXPORT TO WORD
-save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df)
+# ==========================================
+# 5. Export Reports & Syntax
+# ==========================================
+# Export to Markdown instead of Word
+save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df)
+
+# Generate Syntax Files
+generate_syntax_files(scale_items)
