@@ -35,7 +35,54 @@ def get_significance_stars(p_value):
     elif p_value < 0.05: return '*'
     else: return ''
 
-def save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit, filename="Research_Result.docx"):
+def calculate_ave_cr(loadings):
+    """
+    Calculates AVE and CR from factor loadings.
+    Formula:
+    AVE = (sum(lambda^2)) / (sum(lambda^2) + sum(error_var))
+    CR = (sum(lambda)^2) / ((sum(lambda)^2) + sum(error_var))
+    
+    Note: For simplicity, we assume standardized loadings or approximate using estimates.
+    If 'Std. Estimate' is available effectively, use it. Here we use 'Estimate'.
+    We assume Error Variance = 1 - Loading^2 (Standardized assumption).
+    """
+    results = []
+    # Group by Latent Variable (lval)
+    factors = loadings['lval'].unique()
+    
+    for factor in factors:
+        factor_loadings = loadings[loadings['lval'] == factor]['Estimate']
+        
+        # Calculate Lambda Squared
+        lam_sq = factor_loadings ** 2
+        sum_lam_sq = lam_sq.sum()
+        
+        # Calculate Sum of Lambda (for CR)
+        sum_lam = factor_loadings.sum()
+        
+        # Calculate Error Variance (assuming standardized: 1 - lam^2)
+        # Using 1 - lam^2 ensures we don't get negative errors if loading > 1 (which shouldn't happen in std)
+        # We clamp loading to 0.99 to avoid div by zero or negative
+        clamped_loadings = factor_loadings.clip(upper=0.99)
+        error_var = 1 - (clamped_loadings ** 2)
+        sum_error = error_var.sum()
+        
+        # AVE
+        ave = sum_lam_sq / (sum_lam_sq + sum_error)
+        
+        # CR
+        cr = (sum_lam ** 2) / ((sum_lam ** 2) + sum_error)
+        
+        results.append({
+            "Variable": factor,
+            "AVE": round(ave, 3),
+            "CR": round(cr, 3),
+            "Status": "Good" if ave > 0.5 and cr > 0.7 else "Check"
+        })
+        
+    return pd.DataFrame(results)
+
+def save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, filename="Research_Result.docx"):
     print(f"\nGenerating Word Report: {filename}...")
     doc = Document()
     
@@ -45,8 +92,9 @@ def save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit, filename="Research_Re
     
     def add_table_to_doc(df, title):
         doc.add_heading(title, level=2)
+        # Create table
         table = doc.add_table(rows=1, cols=len(df.columns))
-        table.style = 'Table Grid' # Basic style, can be 'Table Normal' for no borders
+        table.style = 'Table Grid'
         
         # Header
         hdr_cells = table.rows[0].cells
@@ -57,7 +105,9 @@ def save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit, filename="Research_Re
         for index, row in df.iterrows():
             row_cells = table.add_row().cells
             for i, val in enumerate(row):
-                row_cells[i].text = str(val)
+                # FIX: Handle NaN/None to prevent Word corruption
+                text_val = str(val) if pd.notna(val) else ""
+                row_cells[i].text = text_val
         
         doc.add_paragraph("\n")
 
@@ -68,24 +118,23 @@ def save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit, filename="Research_Re
     add_table_to_doc(corr_df, "Table 2. Correlation Matrix")
 
     # 3. Model Fit
-    # Select key columns
     fit_cols = ['RMSEA', 'CFI', 'TLI', 'chi2', 'chi2 p-value', 'DoF']
-    # Filter columns that exist in cfa_fit
     existing_cols = [c for c in fit_cols if c in cfa_fit.columns]
     fit_summary = cfa_fit[existing_cols]
     add_table_to_doc(fit_summary, "Table 3. Model Fit Indices")
 
     # 4. Factor Loadings
-    # Filter for loadings (op is '=~')
     loadings = cfa_loadings[cfa_loadings['op'] == '=~'].copy()
-    # Select columns
     loadings = loadings[['lval', 'rval', 'Estimate', 'p-value', 'Std. Err']]
-    # Round
     loadings['Estimate'] = loadings['Estimate'].apply(lambda x: round(x, 3))
     loadings['p-value'] = loadings['p-value'].apply(lambda x: round(x, 3))
-    loadings['Std. Err'] = loadings['Std. Err'].apply(lambda x: round(x, 3) if x != '-' else '-')
+    # Check for non-numeric Std Err
+    loadings['Std. Err'] = loadings['Std. Err'].apply(lambda x: round(x, 3) if isinstance(x, (int, float)) and pd.notna(x) else '-')
     
     add_table_to_doc(loadings, "Table 4. Factor Loadings")
+
+    # 5. Validity (CR & AVE)
+    add_table_to_doc(ave_cr_df, "Table 5. Convergent Validity (CR & AVE)")
 
     doc.save(filename)
     print(f"Report saved to {filename}")
@@ -107,13 +156,11 @@ search_pattern = 'T1_*_SPSS.csv'
 list_of_files = glob.glob(search_pattern)
 
 if list_of_files:
-    # Use os.path.getmtime to sort by modification time, newest last
     latest_file = max(list_of_files, key=os.path.getmtime)
     print(f"Found {len(list_of_files)} data files. Using the latest: {latest_file}")
     data = pd.read_csv(latest_file)
 else:
-    print(f"Warning: No files matching '{search_pattern}' found in current directory.")
-    print("Generating MOCK data for demonstration...")
+    print(f"Warning: No files matching '{search_pattern}' found. Generating MOCK data...")
     np.random.seed(42)
     N = 377
     data = pd.DataFrame()
@@ -125,7 +172,6 @@ else:
             item_val = (item_val * 1.0) + 3.5
             item_val = np.clip(item_val, 1, 6)
             data[col_name] = item_val
-    print("Generated Mock Columns:", data.columns.tolist())
 
 # ==========================================
 # 2. Reliability & Descriptive Statistics
@@ -152,11 +198,10 @@ for scale, items in scale_items.items():
     })
 
 stats_df = pd.DataFrame(stats_list)
-print(stats_df)
 stats_df.to_csv("descriptive_reliability.csv", index=False)
 
 # ==========================================
-# 3. Correlation Matrix with Stars
+# 3. Correlation Matrix
 # ==========================================
 print("\n--- Correlation Matrix ---")
 cols = stats_df['Variable'].tolist()
@@ -174,11 +219,10 @@ for r in cols:
     corr_data.append(row_data)
 
 corr_df = pd.DataFrame(corr_data)
-print(corr_df)
 corr_df.to_csv("correlation_matrix.csv", index=False)
 
 # ==========================================
-# 4. Run Analysis (CFA) & Export Word
+# 4. CFA & Validity
 # ==========================================
 model_desc = """
     HCP =~ HCP1 + HCP2 + HCP3 + HCP4_R + HCP5 + HCP6_R
@@ -191,17 +235,32 @@ model_desc = """
 print("\nRunning CFA Model...")
 cfa_loadings = pd.DataFrame()
 cfa_fit = pd.DataFrame()
+ave_cr_df = pd.DataFrame() # Empty default
 
 try:
     model = semopy.Model(model_desc)
     model.fit(data)
     
-    cfa_loadings = model.inspect()
+    # Use std_est=True if available for better AVE/CR, else normal Estimate
+    # semopy 2.0+ might support it. Using try-except to be safe
+    try:
+        cfa_loadings = model.inspect(std_est=True)
+    except:
+        print("Note: semopy 'std_est' not available, using unstandardized estimates.")
+        cfa_loadings = model.inspect()
+
     cfa_fit = semopy.calc_stats(model).T
     
     print("\n--- Model Fit Indices ---")
     print(cfa_fit) 
     
+    # Calculate Validity
+    # Filter only measurement part for AVE/CR
+    measurement_loadings = cfa_loadings[cfa_loadings['op'] == '=~']
+    ave_cr_df = calculate_ave_cr(measurement_loadings)
+    print("\n--- Convergent Validity (CR & AVE) ---")
+    print(ave_cr_df)
+
     cfa_loadings.to_csv("cfa_results_loadings.csv")
     cfa_fit.to_csv("cfa_results_fit.csv")
 
@@ -209,4 +268,4 @@ except Exception as e:
     print(f"\nError running model: {e}")
 
 # EXPORT TO WORD
-save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit)
+save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df)
