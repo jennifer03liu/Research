@@ -87,11 +87,11 @@ def save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, error_
         
         f.write("## Table 3. Model Fit Indices\n")
         if not cfa_fit.empty:
-            fit_cols = ['RMSEA', 'CFI', 'TLI', 'chi2', 'chi2 p-value', 'DoF']
-            existing_cols = [c for c in fit_cols if c in cfa_fit.columns]
-            f.write(cfa_fit[existing_cols].to_markdown(index=False))
+            # Write all columns to avoid missing data due to name mismatches
+            f.write(cfa_fit.to_markdown(index=False))
         else:
             f.write("(No Data)\n")
+
         f.write("\n\n")
         
         f.write("## Table 4. Factor Loadings\n")
