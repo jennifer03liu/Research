@@ -2,6 +2,7 @@ import pandas as pd
 import semopy
 import numpy as np
 import os
+import glob
 from scipy.stats import pearsonr
 from docx import Document
 from docx.shared import Pt
@@ -92,8 +93,6 @@ def save_to_word(stats_df, corr_df, cfa_loadings, cfa_fit, filename="Research_Re
 # ==========================================
 # 1. Load Data
 # ==========================================
-FILENAME = 'T1_0105_377_SPSS.csv'
-
 # Define Scale Items
 scale_items = {
     "HCP": ["HCP1", "HCP2", "HCP3", "HCP4_R", "HCP5", "HCP6_R"],
@@ -103,11 +102,18 @@ scale_items = {
     "CI":  ["CI1", "CI2", "CI3", "CI4", "CI5", "CI6", "CI7", "CI8"]
 }
 
-if os.path.exists(FILENAME):
-    print(f"Loading data from {FILENAME}...")
-    data = pd.read_csv(FILENAME)
+# Find latest CSV file matching pattern
+search_pattern = 'T1_*_SPSS.csv'
+list_of_files = glob.glob(search_pattern)
+
+if list_of_files:
+    # Use os.path.getmtime to sort by modification time, newest last
+    latest_file = max(list_of_files, key=os.path.getmtime)
+    print(f"Found {len(list_of_files)} data files. Using the latest: {latest_file}")
+    data = pd.read_csv(latest_file)
 else:
-    print(f"Warning: {FILENAME} not found. Generating MOCK data...")
+    print(f"Warning: No files matching '{search_pattern}' found in current directory.")
+    print("Generating MOCK data for demonstration...")
     np.random.seed(42)
     N = 377
     data = pd.DataFrame()
