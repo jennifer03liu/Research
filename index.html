@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>職涯發展與工作狀況調查問卷 (T1)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&family=Montserrat:wght@400;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --background-color: #121826;
+            --text-color: #E2E8F0;
+            --spinner-track-color: #334155;
+            --spinner-color: #38BDF8;
+        }
+
+        body,
+        html {
+            height: 100%;
+            margin: 0;
+            font-family: 'Montserrat', 'Noto Sans TC', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            overflow: hidden;
+        }
+
+        .loading-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            text-align: center;
+            padding: 1rem;
+        }
+
+        .spinner {
+            border: 6px solid var(--spinner-track-color);
+            border-top-color: var(--spinner-color);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+            margin-bottom: 2.5rem;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-text {
+            font-size: 1.125rem;
+            font-weight: 400;
+            letter-spacing: 0.5px;
+        }
+
+        .loading-text p {
+            margin: 0;
+            padding: 0;
+        }
+
+        .loading-text .lang-en {
+            margin-top: 0.75rem;
+            font-size: 0.9rem;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="loading-container">
+        <div class="spinner"></div>
+
+        <div class="loading-content">
+            <h3>國立中山大學人管所 學術研究</h3>
+
+            <ul class="info-list">
+                <li><strong>研究主題：</strong>職場工作者職涯發展歷程</li>
+                <li><strong>研究設計：</strong>需填寫 3 次（每次間隔四週）</li>
+                <li><strong>隱私保護：</strong>採嚴格匿名制，請依真實感受回答</li>
+            </ul>
+
+            <div class="highlight-reward">
+                🎉 全程參與抽 <strong>500元 7-11 禮券</strong> (共50名)
+            </div>
+
+            <div class="footer-info">
+                <p>指導教授：王豫萱 博士 ｜ 研究生：劉人瑄</p>
+                <p class="status-text">正在生成問卷，請稍候...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // CONFIGURATION
+        // ==========================================
+
+        // 1. GAS 後端網址 (請填入部署後的 Web App URL)
+        const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwkziN92AA0J4JX-lH2af8smTSJLDEqw_6f1fV8Bv3fe49Tmd3QpaqoZTf3ZqIUFzjc/exec";
+
+        // 2. Google Form 設定
+        const FORM_BASE_URL = "https://docs.google.com/forms/d/e/1FAIpQLScfi6G7InS212ZMIeu5Yx5rEO1OX0bWKGSZo-iVnm1OWQeCPQ/viewform";
+        const ENTRY_ID = "entry.701942597"; // 驗證碼欄位 ID
+
+        // ==========================================
+
+        function generateUUID() {
+            if (crypto && crypto.randomUUID) return crypto.randomUUID();
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        (async function () {
+            const uniqueId = generateUUID();
+            const finalUrl = `${FORM_BASE_URL}?usp=pp_url&${ENTRY_ID}=${uniqueId}`;
+
+            // 非同步寫入 Google Sheet (Fire-and-forget)
+            try {
+                // 檢查 GAS_API_URL 是否為預設或未設定值
+                if (GAS_API_URL && !GAS_API_URL.includes("AKfyc") && !GAS_API_URL.includes("你的ID")) {
+                    console.warn("GAS URL 似乎尚未設定，跳過寫入");
+                } else {
+                    fetch(GAS_API_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        keepalive: true, // 重要：即使頁面跳轉也保持連線
+                        body: JSON.stringify({ code: uniqueId, url: finalUrl, timestamp: new Date().toISOString() })
+                    });
+                }
+            } catch (e) {
+                console.error("Logging to Google Sheet failed.", e);
+            }
+
+            // 稍微延遲 800ms 後執行跳轉，增加成功率 (特別針對 LINE 內建瀏覽器)
+            setTimeout(() => {
+                window.location.replace(finalUrl);
+            }, 800);
+        })();
+    </script>
+</body>
+
+</html>
