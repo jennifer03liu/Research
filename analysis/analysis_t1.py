@@ -75,7 +75,7 @@ def calculate_ave_cr(loadings):
         
     return pd.DataFrame(results)
 
-def save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, error_msg=None, filename="Research_Result.md"):
+def save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, comparison_df=None, error_msg=None, filename="Research_Result.md"):
     print(f"\nGenerating Markdown Report: {filename}...")
     
     with open(filename, 'w', encoding='utf-8') as f:
@@ -133,6 +133,12 @@ def save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, error_
         else:
             f.write("(No Data)\n")
         f.write("\n\n")
+
+        if comparison_df is not None and not comparison_df.empty:
+            f.write("## Table 6. Model Comparison Summary\n")
+            f.write("Comparison of alternative models metrics.\n")
+            f.write(comparison_df.to_markdown(index=False))
+            f.write("\n\n")
 
         
     print(f"Report saved to {filename}")
@@ -309,52 +315,137 @@ corr_df.to_csv(f"correlation_matrix_{timestamp}.csv", index=False)
 # ==========================================
 # 4. CFA & Validity
 # ==========================================
-model_desc = """
-    HP =~ HP1 + HP2 + HP3 + HP4_R + HP5 + HP6_R
-    JCP =~ JCP1_R + JCP2_R + JCP3_R + JCP4_R + JCP5_R
-    PP =~ PP1 + PP2 + PP3 + PP4 + PP5 + PP6
-    DP =~ DP1 + DP2 + DP3 + DP4 + DP5
-    CI =~ CI1 + CI2 + CI3 + CI4 + CI5 + CI6 + CI7 + CI8
-"""
+# ==========================================
+# 4. CFA & Validity (Multi-Model Comparison)
+# ==========================================
+print("\n--- Running Multi-Model CFA Comparison ---")
 
-print("\nRunning CFA Model...")
-cfa_loadings = pd.DataFrame()
-cfa_fit = pd.DataFrame()
-ave_cr_df = pd.DataFrame()
-error_msg = None
+# Define Item Groups helper
+def get_items_str(key):
+    return " + ".join(scale_items[key])
+
+# 1. Define Models
+models_config = {
+    "Model_1_5Factors": {
+        "desc": "Original 5 Factors (HP, JCP, PP, DP, CI)",
+        "syntax": f"""
+            HP =~ {get_items_str('HP')}
+            JCP =~ {get_items_str('JCP')}
+            PP =~ {get_items_str('PP')}
+            DP =~ {get_items_str('DP')}
+            CI =~ {get_items_str('CI')}
+        """
+    },
+    "Model_2_4Factors_CP": {
+        "desc": "4 Factors: CP(HP+JCP), PP, DP, CI",
+        "syntax": f"""
+            CP =~ {get_items_str('HP')} + {get_items_str('JCP')}
+            PP =~ {get_items_str('PP')}
+            DP =~ {get_items_str('DP')}
+            CI =~ {get_items_str('CI')}
+        """
+    },
+    "Model_3_4Factors_NoPP": {
+        "desc": "4 Factors: HP, JCP, DP, CI (Exclude PP)",
+        "syntax": f"""
+            HP =~ {get_items_str('HP')}
+            JCP =~ {get_items_str('JCP')}
+            DP =~ {get_items_str('DP')}
+            CI =~ {get_items_str('CI')}
+        """
+    },
+    "Model_4_3Factors_CP_NoPP": {
+        "desc": "3 Factors: CP, DP, CI (Exclude PP)",
+        "syntax": f"""
+            CP =~ {get_items_str('HP')} + {get_items_str('JCP')}
+            DP =~ {get_items_str('DP')}
+            CI =~ {get_items_str('CI')}
+        """
+    },
+    "Model_5_4Factors_NoDP": {
+        "desc": "4 Factors: HP, JCP, PP, CI (Exclude DP)",
+        "syntax": f"""
+            HP =~ {get_items_str('HP')}
+            JCP =~ {get_items_str('JCP')}
+            PP =~ {get_items_str('PP')}
+            CI =~ {get_items_str('CI')}
+        """
+    },
+    "Model_6_3Factors_CP_NoDP": {
+        "desc": "3 Factors: CP, PP, CI (Exclude DP)",
+        "syntax": f"""
+            CP =~ {get_items_str('HP')} + {get_items_str('JCP')}
+            PP =~ {get_items_str('PP')}
+            CI =~ {get_items_str('CI')}
+        """
+    }
+}
+
+model_fit_results = []
+all_loadings = {}
+cfa_loadings = pd.DataFrame() # To keep compatibility with output section
+ave_cr_df = pd.DataFrame()    # To keep compatibility
+cfa_fit = pd.DataFrame()      # To keep compatibility
+comparison_df = pd.DataFrame() # Initialize to avoid NameError
+best_model_name = "Model_1_5Factors" # Default
 
 try:
-    # 1. Prepare Data for CFA (Drop Missing)
+    # Prepare Data
     cfa_data = data[available_cols_flat].dropna()
-    print(f"Observations for CFA: {len(cfa_data)} (Original: {len(data)})")
+    print(f"Observations for CFA: {len(cfa_data)}")
     
     if len(cfa_data) < 10:
-        raise ValueError("Too few observations after dropping missing values.")
+        raise ValueError("Too few observations.")
 
-    # 2. Fit Model
-    model = semopy.Model(model_desc)
-    model.fit(cfa_data)
-    
-    try:
-        cfa_loadings = model.inspect(std_est=True)
-    except:
-        cfa_loadings = model.inspect()
+    for m_name, config in models_config.items():
+        print(f"Running {m_name}...")
+        try:
+            model = semopy.Model(config['syntax'])
+            model.fit(cfa_data)
+            
+            # Get Fit Indices
+            stats = semopy.calc_stats(model).T
+            stats['Model'] = m_name
+            stats['Description'] = config['desc']
+            model_fit_results.append(stats)
+            
+            # Get Loadings (Store for CSV export)
+            try:
+                loadings = model.inspect(std_est=True)
+            except:
+                loadings = model.inspect()
+            
+            loadings['Model'] = m_name
+            all_loadings[m_name] = loadings
+            
+            # Keep the 5-Factor model as the "Main" result for display in tables 4 & 5
+            if m_name == "Model_1_5Factors":
+                cfa_loadings = loadings
+                cfa_fit = stats
+                
+        except Exception as e:
+            print(f"  Failed {m_name}: {e}")
+            model_fit_results.append(pd.DataFrame({'Model': [m_name], 'Description': [config['desc']], 'Error': [str(e)]}))
 
-    cfa_fit = semopy.calc_stats(model).T
-    
-    print("\n--- Model Fit Indices ---")
-    print(cfa_fit) 
-    
-    measurement_loadings = cfa_loadings[cfa_loadings['op'] == '=~']
-    ave_cr_df = calculate_ave_cr(measurement_loadings)
-    print("\n--- Convergent Validity ---")
-    print(ave_cr_df)
-
-
+    # Compile Comparison Table
+    if model_fit_results:
+        comparison_df = pd.concat(model_fit_results, ignore_index=True)
+        cols_order = ['Model', 'Description', 'Chi2', 'DoF', 'p-value', 'CFI', 'TLI', 'RMSEA', 'AIC', 'BIC', 'Error']
+        # Filter cols that exist
+        cols_order = [c for c in cols_order if c in comparison_df.columns]
+        comparison_df = comparison_df[cols_order]
+        
+        print("\n--- Model Comparison Summary ---")
+        print(comparison_df.to_markdown(index=False))
+        
+        # Calculate validity for the MAIN model (Model 1)
+        if not cfa_loadings.empty:
+            measurement_loadings = cfa_loadings[cfa_loadings['op'] == '=~']
+            ave_cr_df = calculate_ave_cr(measurement_loadings)
 
 except Exception as e:
     error_msg = str(e)
-    print(f"\nError running model: {e}")
+    print(f"\nCritical Error in CFA loop: {e}")
 
 # ==========================================
 # 5. Export Reports & Syntax
@@ -392,5 +483,6 @@ cfa_loadings.to_csv(f"cfa_results_loadings_{timestamp}.csv")
 cfa_fit.to_csv(f"cfa_results_fit_{timestamp}.csv")
 ave_cr_df.to_csv(f"cfa_results_validity_{timestamp}.csv", index=False)
 
-save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, error_msg, filename=f"Research_Result_{timestamp}.md")
+save_to_markdown(stats_df, corr_df, cfa_loadings, cfa_fit, ave_cr_df, comparison_df, error_msg, filename=f"Research_Result_{timestamp}.md")
+comparison_df.to_csv(f"model_comparison_{timestamp}.csv", index=False)
 generate_syntax_files(scale_items, timestamp)
