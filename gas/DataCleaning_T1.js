@@ -48,8 +48,10 @@ function cleanAndExportData() {
     // Work Hours
     var colWorkHours = findCol(headers, "每周平均工時");
 
-    // Matching ID (Birthday + Phone)
+    // Matching ID (Birthday + Phone) from raw data (e.g. AO column)
+    // 標題關鍵字: "請填寫您的出生月份日期及手機末3碼"
     var colMatch = findCol(headers, "手機末3碼");
+    if (colMatch < 0) colMatch = findCol(headers, "出生月份日期");
 
     // PM 變數 (4題 + 1多選)
     var colPM_Has = findCol(headers, "是否有進行績效考核");
@@ -73,6 +75,14 @@ function cleanAndExportData() {
     // CI (9題, 中間夾檢核題 Attn2)
     var colCI_Start = findCol(headers, "我想調整或改變自己的職涯");
 
+    // T2 自動化所需欄位 (請在原始表單手動新增 "自訂UID" 欄位並填入酷炫代碼)
+    // Email 欄位通常是 Google Form 自動收集或有一題詢問 "電子郵件地址"
+    var colEmail = findCol(headers, "電子郵件地址") > -1 ? findCol(headers, "電子郵件地址") : findCol(headers, "Email");
+    // 如果找不到 Email，試試看 "聯絡資訊" (T1_Log 需要)
+    if (colEmail < 0) colEmail = findCol(headers, "聯絡資訊");
+
+    var colCustomUID = findCol(headers, "Custom_UID"); // 使用者手動在原始表單插入的欄位
+
     // 背景變數
     var colGender = findCol(headers, "性別");
     var colAge = findCol(headers, "年齡");
@@ -89,6 +99,7 @@ function cleanAndExportData() {
     var colSize = findCol(headers, "公司規模");
 
     // --- 檢查必要欄位 ---
+    // 注意: 自訂 UID 為選用 (若沒填則之後在 T1_Log 補)，但為了 T2 自動化建議要有
     if (colAttn1 < 0 || colAttn2 < 0 || colCP_Start < 0 || colNowJobY < 0) {
         Browser.msgBox("欄位偵測失敗，請檢查問卷標題文字是否變動。");
         return;
@@ -97,7 +108,9 @@ function cleanAndExportData() {
     // --- 設定新的標題列 (SPSS Format) ---
     var newHeaders = [
         "Timestamp",
-        "Match_ID", // Add Matching ID
+        "Custom_UID", // 用於 T2 匹配的酷炫代碼
+        "Email",      // 用於 T2 寄信
+        "Match_ID",   // 系統備用 (您的 AO 欄位: 生日+手機，自動補0)
         "WorkHours", // 新增
         // PM
         "PM_Has",
@@ -178,11 +191,49 @@ function cleanAndExportData() {
         // --- 提取與轉換數據 ---
         var newRow = [];
 
-        // Timestamp
+        // Timestamp (直接保留原始格式，不做刪減)
         newRow.push(row[colTimestamp]);
 
-        // Match ID
-        newRow.push(row[colMatch]);
+        // Custom UID (T2 酷炫代碼)
+        // 格式化: 確保是字串，並且統一格式 (一律變成 XXXX-XXXX)
+        // 假設使用者輸入的是 8 碼亂碼 (無論有無橫線)
+        var rawUID = (colCustomUID > -1 ? row[colCustomUID] : "");
+        var finalUID = "";
+        if (rawUID) {
+            finalUID = String(rawUID).trim();
+            // 移除可能存在的舊橫線，重新格式化 (確保位置統一在中間)
+            var cleanUID = finalUID.replace(/-/g, "");
+            if (cleanUID.length === 8) {
+                finalUID = cleanUID.substr(0, 4) + "-" + cleanUID.substr(4, 4);
+            } else {
+                // 若不是標準 8 碼，維持原樣 (或者您希望這裡報錯?)
+                finalUID = cleanUID;
+            }
+        }
+        newRow.push(finalUID);
+
+        // Email (T2 寄信)
+        newRow.push(colEmail > -1 ? row[colEmail] : "");
+
+        // Match ID (AO 欄位: 生日+手機)
+        // 強制補0機制: 不管原始是什麼型態，先轉字串再補
+        var matchVal = row[colMatch];
+        if (matchVal !== "" && matchVal !== null) {
+            matchVal = String(matchVal).trim();
+            // 如果是純數字 (例如 "101568" 或 101568)，長度 < 7 就補0
+            // 這裡用 Regex 檢查是否為純數字，避免補到文字
+            if (/^\d+$/.test(matchVal)) {
+                while (matchVal.length < 7) {
+                    matchVal = "0" + matchVal;
+                }
+            }
+        } else {
+            matchVal = ""; // 確保 null/undefined 變空字串
+        }
+        // Force output as string to prevent Excel/Sheet from auto-converting back to number
+        // Adding a leading apostrophe is a common trick, or just rely on the later steps.
+        // For GAS array output, string type should be preserved if mixed.
+        newRow.push("'" + matchVal); // 加上單引號強制 Excel 把它當文字處理 (避免再次把0吃掉)
 
         // Work Hours (Encoding: 1=40+, 0=<40)
         var whVal = String(row[colWorkHours]);

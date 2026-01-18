@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>職涯發展調查 T2 (跳轉中)</title>
+    <style>
+        body {
+            font-family: 'Montserrat', 'Noto Sans TC', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: #121826;
+            color: #E2E8F0;
+            flex-direction: column;
+        }
+
+        .spinner {
+            border: 4px solid #334155;
+            border-top: 4px solid #38BDF8;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="spinner"></div>
+    <div style="text-align: center;">
+        <h3>正在為您建立第二階段專屬問卷...</h3>
+        <p style="opacity: 0.7; font-size: 0.9em;">系統自動帶入資料中，請稍候</p>
+    </div>
+
+    <script>
+        // ================= CONFIGURATION (請修改這裡) =================
+
+        // 1. T2 Google Form 網址
+        const T2_FORM_URL = "https://docs.google.com/forms/d/e/您的T2問卷ID/viewform";
+
+        // 2. Google Form 欄位對應 ID
+        // 2. Google Form 欄位對應 ID
+        const FORM_ENTRIES = {
+            MATCH_CODE: "entry.˙701942597",       // [必填] 配對流水號欄位
+            EMAIL: "entry.179825483",       // [預填] Email
+            BIRTH_PHONE_COMBINED: "entry.1393195182" // [預填] 生日後4碼+手機後3碼 (合併題)
+        };
+        // =============================================================
+
+        (function () {
+            // 1. 從網址取得參數
+            const params = new URLSearchParams(window.location.search);
+            const uid = params.get('uid');
+
+            // 2. 救援模式 (Rescue Mode)
+            // 如果網址沒有 uid (使用者自己誤刪，或重新整理遺失)，則進入救援模式
+            // 生成一個 "R" (Rescue) 開頭的代碼，格式模仿 T1 (R-時間戳-亂數)，保持一致性但可供識別
+            const isRescue = !uid;
+            const finalUid = uid || "R-" + Date.now().toString(36).toUpperCase() + "-" + Math.random().toString(36).substr(2, 5).toUpperCase();
+
+            // 2. 取得其他預填資料
+            // 這裡抓取 verify 參數 (應包含 生日+手機 組合字串)
+            // 為了相容性，同時檢查 'verify' 和 'phone' 參數
+            const inputData = {
+                email: params.get('email') || "",
+                verify_str: params.get('verify') || params.get('phone') || ""
+            };
+
+            // 3. 產生時間戳記
+            const timestamp = Math.floor(Date.now() / 1000);
+
+            // 4. 組合複合代碼: [身分ID]_[時間戳]
+            const compositeCode = `${finalUid}_${timestamp}`;
+
+            // 5. 組合 Google Form 網址參數
+            const formParams = new URLSearchParams();
+            formParams.append("usp", "pp_url");
+
+            // 填入配對碼
+            formParams.append(FORM_ENTRIES.MATCH_CODE, compositeCode);
+
+            // 填入 Email
+            if (inputData.email && FORM_ENTRIES.EMAIL) formParams.append(FORM_ENTRIES.EMAIL, inputData.email);
+
+            // 填入 合併驗證碼 (生日+手機)
+            if (inputData.verify_str && FORM_ENTRIES.BIRTH_PHONE_COMBINED) {
+                formParams.append(FORM_ENTRIES.BIRTH_PHONE_COMBINED, inputData.verify_str);
+            }
+
+            const finalUrl = `${T2_FORM_URL}?${formParams.toString()}`;
+
+            // 6. 執行跳轉
+            setTimeout(() => {
+                window.location.replace(finalUrl);
+            }, 800);
+        })();
+    </script>
+</body>
+
+</html>
