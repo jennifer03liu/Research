@@ -388,6 +388,7 @@ ave_cr_df = pd.DataFrame()    # To keep compatibility
 cfa_fit = pd.DataFrame()      # To keep compatibility
 comparison_df = pd.DataFrame() # Initialize to avoid NameError
 best_model_name = "Model_1_5Factors" # Default
+error_msg = None
 
 try:
     # Prepare Data
