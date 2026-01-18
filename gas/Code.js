@@ -18,10 +18,10 @@
 const CONFIG = {
   // 1. Google Sheet 分頁名稱
   SHEET_NAME_T1_LOG: "T1_Log",  // 存放 T1 點擊紀錄的分頁 (請自行建立)
-  
+
   // 2. T2 問卷產生器網址 (GitHub Pages 那個)
-  T2_REDIRECT_URL: "https://您的帳號.github.io/專案名稱/T2_Survey_Redirect.html",
-  
+  T2_REDIRECT_URL: "https://jennifer03liu.github.io/Research/T2_Survey_Redirect.html",
+
   // 3. Email 寄件設定
   EMAIL_SUBJECT: "【問卷邀請】職涯發展研究 - 第二階段問卷 (T2)",
   EMAIL_SENDER_NAME: "國立中山大學人管所研究團隊"
@@ -36,26 +36,26 @@ const CONFIG = {
 function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.tryLock(10000);
-  
+
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME_T1_LOG);
-    if(!sheet) throw new Error("找不到分頁: " + CONFIG.SHEET_NAME_T1_LOG);
-    
+    if (!sheet) throw new Error("找不到分頁: " + CONFIG.SHEET_NAME_T1_LOG);
+
     // 解析 JSON 資料
     const data = JSON.parse(e.postData.contents);
     const uid = data.code || "";      // T1 產生的 UUID
     const timestamp = new Date();     // 接收到的時間 (現在)
-    
+
     // 寫入資料: [時間戳, UUID, 狀態]
     // 建議欄位順序: A:時間, B:UUID, C:Email(若有), D:手機(若有), E:T2已發送(系統用)
     // 注意: T1 index.html 只會傳 uid，所以 C, D 兩欄這時候是空的，後續需要您用 VLOOKUP 從問卷回應表補進去
-    sheet.appendRow([timestamp, uid, "", "", "FALSE"]); 
-    
-    return ContentService.createTextOutput(JSON.stringify({status: "success"}))
+    sheet.appendRow([timestamp, uid, "", "", "FALSE"]);
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
       .setMimeType(ContentService.MimeType.JSON);
-      
+
   } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({status: "error", message: error.toString()}))
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: error.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
   } finally {
     lock.releaseLock();
@@ -68,8 +68,8 @@ function doPost(e) {
  */
 function sendT2FollowUpEmails() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME_T1_LOG);
-  if(!sheet) return;
-  
+  if (!sheet) return;
+
   const data = sheet.getDataRange().getValues();
   // 假設資料結構: 
   // Col A (0): T1填寫時間
@@ -77,11 +77,11 @@ function sendT2FollowUpEmails() {
   // Col C (2): Email (⚠️重要：這欄需要您從問卷資料手動貼過來，或用VLOOKUP自動帶入)
   // Col D (3): 手機/驗證碼 (⚠️重要：同上)
   // Col E (4): T2已發送 (TRUE/FALSE)
-  
+
   const today = new Date();
   // 清除時間部分，只比對日期
-  today.setHours(0,0,0,0);
-  
+  today.setHours(0, 0, 0, 0);
+
   // 從第 2 行開始跑 (跳過標題)
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
@@ -90,27 +90,27 @@ function sendT2FollowUpEmails() {
     const email = row[2];
     const verifySum = row[3]; // 生日+手機合併碼
     const isSent = row[4];
-    
+
     // 基本檢查
     if (!t1Date || isNaN(t1Date.getTime())) continue; // 日期無效跳過
     if (isSent === true || isSent === "TRUE") continue; // 已經寄過就跳過
     if (!email || !uid) continue; // 資料不全跳過 (如果 Email 空白就不寄)
-    
+
     // 計算日數差
     // 設定 t1Date 的時間為 0 點，純算天數
     const t1PureDate = new Date(t1Date);
-    t1PureDate.setHours(0,0,0,0);
-    
+    t1PureDate.setHours(0, 0, 0, 0);
+
     const diffTime = today - t1PureDate;
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
-    
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
     // 檢查是否剛好滿 28 天 (或是超過28天還沒寄，當作補寄)
     if (diffDays >= 28) {
-      
+
       // 1. 產生個人化連結
       // .../T2.html?uid=xxx&email=xxx&verify=xxx
       const personalizedLink = `${CONFIG.T2_REDIRECT_URL}?uid=${uid}&email=${encodeURIComponent(email)}&verify=${verifySum}`;
-      
+
       // 2. 寄送 Email
       try {
         MailApp.sendEmail({
@@ -136,11 +136,11 @@ function sendT2FollowUpEmails() {
             </div>
           `
         });
-        
+
         // 3. 標記為已發送
         sheet.getRange(i + 1, 5).setValue("TRUE"); // Col E set to TRUE
         console.log(`Sent to ${email} (UID: ${uid})`);
-        
+
       } catch (e) {
         console.error(`Failed to send to ${email}: ${e}`);
       }
