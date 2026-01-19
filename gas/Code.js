@@ -119,20 +119,23 @@ function sendT2FollowUpEmails() {
           name: CONFIG.EMAIL_SENDER_NAME,
           htmlBody: `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-              <h3 style="color: #2c3e50;">職涯發展研究 - 第二階段問卷邀請</h3>
-              <p>親愛的參與者 您好：</p>
-              <p>感謝您在四週前參與了第一階段的研究。時間過得很快，現在邀請您填寫第二階段問卷 (Time 2)。</p>
-              <p>為了節省您的時間，我們已為您建立了專屬連結，點擊下方按鈕即可自動帶入資料：</p>
+              <h3 style="color: #2c3e50;">職涯發展研究 - 第二階段問卷 (2/3)</h3>
+              <p>親愛的職場夥伴，歡迎回來！</p>
+              <p>再次感謝您參與這項關於職涯發展的長期研究。</p>
+              <p><strong>【當前進度】 第二階段 (2/3)</strong></p>
+              <p>距離完成僅剩最後一步！請記得，需<strong>完整填答三次問卷</strong>方具備 <strong>500元 7-11 禮券</strong> 的抽獎資格。</p>
+              <p>此次填答約需 10 分鐘，為了能準確連結您的資料，請務必使用與上次相同的 <strong>[Email]</strong> 與 <strong>[手機/生日]</strong> 驗證。</p>
               <br>
               <div style="text-align: center;">
                 <a href="${personalizedLink}" style="background-color: #3b82f6; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
-                  填寫 T2 問卷
+                  填寫 T2 問卷 (自動帶入資料)
                 </a>
               </div>
               <br>
-              <p style="font-size: 14px; color: #666;">(若按鈕無法點擊，請複製連結: <br>${personalizedLink})</p>
+              <p style="font-size: 14px; color: #666;">(本連結已包含您的專屬辨識碼，點擊後請直接填寫，勿修改「配對編號」欄位)</p>
+              <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製連結: <br>${personalizedLink}</p>
               <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;">
-              <p style="font-size: 12px; color: #999;">國立中山大學人管所 研究團隊 敬上</p>
+              <p style="font-size: 12px; color: #999;">國立中山大學人管所 研究團隊 敬上<br>聯絡信箱：M134050804@student.nsysu.edu.tw</p>
             </div>
           `
         });
