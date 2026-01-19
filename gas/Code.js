@@ -23,8 +23,8 @@ const CONFIG = {
   T2_REDIRECT_URL: "https://jennifer03liu.github.io/Research/T2_Survey_Redirect.html",
 
   // 3. Email 寄件設定
-  EMAIL_SUBJECT: "【問卷邀請】職涯發展研究 - 第二階段問卷 (T2)",
-  EMAIL_SENDER_NAME: "國立中山大學人管所研究團隊"
+  EMAIL_SUBJECT: "【問卷邀請】職涯發展研究 - 第二階段問卷",
+  EMAIL_SENDER_NAME: "國立中山大學人管所-劉人瑄"
 };
 
 // =============================================================
@@ -124,11 +124,11 @@ function sendT2FollowUpEmails() {
               <p>再次感謝您參與這項關於職涯發展的長期研究。</p>
               <p><strong>【當前進度】 第二階段 (2/3)</strong></p>
               <p>距離完成僅剩最後一步！請記得，需<strong>完整填答三次問卷</strong>方具備 <strong>500元 7-11 禮券</strong> 的抽獎資格。</p>
-              <p>此次填答約需 10 分鐘，為了能準確連結您的資料，請務必使用與上次相同的 <strong>[Email]</strong> 與 <strong>[手機/生日]</strong> 驗證。</p>
-              <br>
+              <p>此次填答約需 10 分鐘，為了能準確連結您的資料，請務必使用與上次相同的 <strong>Email</strong> 與 <strong>手機末三碼/生日月日共四碼</strong> 驗證。</p>
+              <br
               <div style="text-align: center;">
                 <a href="${personalizedLink}" style="background-color: #3b82f6; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
-                  填寫 T2 問卷 (自動帶入資料)
+                  填寫第二階段問卷
                 </a>
               </div>
               <br>
