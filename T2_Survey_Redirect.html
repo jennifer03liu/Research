@@ -68,9 +68,19 @@
 
             // 2. 救援模式 (Rescue Mode)
             // 如果網址沒有 uid (使用者自己誤刪，或重新整理遺失)，則進入救援模式
-            // 生成一個 "R" (Rescue) 開頭的代碼，格式模仿 T1 (R-時間戳-亂數)，保持一致性但可供識別
+            // 生成格式: XXXX-XXXX (前後4碼，中間橫線)
             const isRescue = !uid;
-            const finalUid = uid || "R-" + Date.now().toString(36).toUpperCase() + "-" + Math.random().toString(36).substr(2, 5).toUpperCase();
+
+            function generateRandomCode(length) {
+                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                let result = '';
+                for (let i = 0; i < length; i++) {
+                    result += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return result;
+            }
+
+            const finalUid = uid || `${generateRandomCode(4)}-${generateRandomCode(4)}`;
 
             // 2. 取得其他預填資料
             // 這裡抓取 verify 參數 (應包含 生日+手機 組合字串)
