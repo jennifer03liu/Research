@@ -68,7 +68,7 @@
 
             // 2. 救援模式 (Rescue Mode)
             // 如果網址沒有 uid (使用者自己誤刪，或重新整理遺失)，則進入救援模式
-            // 生成格式: XXXX-XXXX (前後4碼，中間橫線)
+            // 生成格式: RXXX-XXXX (R開頭，後面接3碼，中間橫線，再4碼)
             const isRescue = !uid;
 
             function generateRandomCode(length) {
@@ -80,7 +80,8 @@
                 return result;
             }
 
-            const finalUid = uid || `${generateRandomCode(4)}-${generateRandomCode(4)}`;
+            // 強制以 'R' 開頭，避免與 Google Sheet 生成的代碼 (S開頭或其他) 重複
+            const finalUid = uid || `R${generateRandomCode(3)}-${generateRandomCode(4)}`;
 
             // 2. 取得其他預填資料
             // 這裡抓取 verify 參數 (應包含 生日+手機 組合字串)
