@@ -24,7 +24,7 @@ const CONFIG = {
 
   // 3. Email 寄件設定
   EMAIL_SUBJECT: "【問卷邀請】職涯發展研究 - 第二階段問卷",
-  EMAIL_SENDER_NAME: "國立中山大學人管所-劉人瑄"
+  EMAIL_SENDER_NAME: "劉人瑄Jennifer(國立中山大學人管所學術研究)"
 };
 
 // =============================================================
@@ -134,8 +134,14 @@ function sendT2FollowUpEmails() {
               <br>
               <p style="font-size: 14px; color: #666;">(本連結已包含您的專屬辨識碼，點擊後請直接填寫，勿修改「配對編號」欄位)</p>
               <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製連結: <br>${personalizedLink}</p>
-              <hr style="border: 0; border-top: 1px solid #eee; margin: 30px 0;">
-              <p style="font-size: 12px; color: #999;">國立中山大學人管所 研究團隊 敬上<br>聯絡信箱：M134050804@student.nsysu.edu.tw</p>
+              <br><br>
+              <p>祝福您2026年一切順心愉快!</p>
+              <br><br>
+              <div style="text-align: right;">
+                國立中山大學人力資源管理研究所<br>
+                指導教授：王豫萱 博士<br>
+                研究生：劉人瑄 敬上
+              </div>
             </div>
           `
         });
