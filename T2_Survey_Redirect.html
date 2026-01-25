@@ -59,6 +59,10 @@
             EMAIL: "entry.179825483",       // [預填] Email
             BIRTH_PHONE_COMBINED: "entry.1393195182" // [預填] 生日後4碼+手機後3碼 (合併題)
         };
+
+        // 3. GAS 後端網址 (用於記錄點擊)
+        const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwkziN92AA0J4JX-lH2af8smTSJLDEqw_6f1fV8Bv3fe49Tmd3QpaqoZTf3ZqIUFzjc/exec";
+
         // =============================================================
 
         (function () {
@@ -114,7 +118,25 @@
 
             const finalUrl = `${T2_FORM_URL}?${formParams.toString()}`;
 
-            // 6. 執行跳轉
+            // (新增) 6. 發送點擊紀錄給 GAS
+            if (uid && GAS_API_URL) {
+                try {
+                    fetch(GAS_API_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        keepalive: true,
+                        body: JSON.stringify({
+                            type: 'T2_CLICK',
+                            code: uid,
+                            email: inputData.email || "",
+                            timestamp: new Date().toISOString()
+                        })
+                    });
+                } catch (e) { console.error("Log failed", e); }
+            }
+
+            // 7. 執行跳轉
             setTimeout(() => {
                 window.location.replace(finalUrl);
             }, 800);
