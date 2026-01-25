@@ -77,9 +77,6 @@ function doPost(e) {
   lock.tryLock(10000);
 
   try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME_PARTICIPANT);
-    if (!sheet) throw new Error("找不到分頁: " + CONFIG.SHEET_NAME_PARTICIPANT);
-
     let data;
     try {
       data = JSON.parse(e.postData.contents);
@@ -90,15 +87,38 @@ function doPost(e) {
     const uid = data.code || Utilities.getUuid();
     const timestamp = new Date();
 
-    // 產生完整 T1 問卷連結
-    // 格式: FormURL?usp=pp_url&entry.xxxx=uid
-    const recordLink = `${CONFIG.T1_FORM_URL}?usp=pp_url&${CONFIG.T1_ENTRY_ID}=${uid}`;
+    // 判斷是 T1 點擊 還是 T2 點擊 (記錄點開時間)
+    if (data.type === 'T2_CLICK') {
+      // --- 處理 T2 點擊 ---
+      const sheetTracking = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME_TRACKING_LOG);
+      if (sheetTracking) {
+        const tData = sheetTracking.getDataRange().getValues();
+        // 找尋對應的 UID (在 Col B / Index 1)
+        for (let i = 1; i < tData.length; i++) {
+          if (String(tData[i][1]) === String(uid)) {
+            // 找到該受試者，將時間寫入 H 欄 (Index 8)
+            sheetTracking.getRange(i + 1, 8).setValue(timestamp);
+            break;
+          }
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", mode: "T2" }))
+        .setMimeType(ContentService.MimeType.JSON);
 
-    // 寫入: [A:時間, B:姓名(空), C:UID, D:連結, E:回填時間(空)]
-    sheet.appendRow([timestamp, "", uid, recordLink, ""]);
+    } else {
+      // --- 處理 T1 點擊 (預設) ---
+      const sheetPart = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME_PARTICIPANT);
+      if (!sheetPart) throw new Error("找不到分頁: " + CONFIG.SHEET_NAME_PARTICIPANT);
 
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", uid: uid }))
-      .setMimeType(ContentService.MimeType.JSON);
+      // 產生完整 T1 問卷連結
+      const recordLink = `${CONFIG.T1_FORM_URL}?usp=pp_url&${CONFIG.T1_ENTRY_ID}=${uid}`;
+
+      // 寫入: [A:時間, B:姓名(空), C:UID, D:連結, E:回填時間(空)]
+      sheetPart.appendRow([timestamp, "", uid, recordLink, ""]);
+
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", uid: uid, mode: "T1" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
 
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({ status: "error", message: error.toString() }))
@@ -212,7 +232,7 @@ function processPhase1Submit(e) {
       false, // E: Sent
       "",    // F: T2 Time
       "",    // G: Duration
-      ""     // H: Error
+      ""     // H: T2 Click Time (由 doPost 預填)
     ]);
     console.log("Successfully synced to Tracking_Log");
 
@@ -284,7 +304,7 @@ function sendT2FollowUpEmails() {
               <p>再次感謝您參與這項關於職涯發展的長期研究。</p>
               
               <p><span style="background-color: #fef08a; font-weight: bold; padding: 2px 5px;">本研究共需完整填答三次。這是第 2 次，完成本次問卷後，再完成 28 天後的最後一次追蹤，即具備 500元 7-11 禮券 抽獎資格！</span></p>
-              <p>此次填答約需 10-15 分鐘，為了能準確連結您的資料，請務必使用與上次相同的 <strong>Email</strong> 與 <strong>手機末三碼/生日月日共七碼</strong> 驗證。</p>
+              <p>此次填答約需 10 分鐘，為了能準確連結您的資料，請務必使用與上次相同的 <strong>Email</strong> 與 <strong>生日月日+手機末三碼共七碼</strong> 驗證。</p>
               <p>匿名與保密：本問卷採嚴格匿名制，所有數據僅供學術統計分析使用，絕不對外公開或用於任何商業用途，請您依照真實感受安心填答。</p>
               <br>
               <div style="text-align: center;">
@@ -309,7 +329,8 @@ function sendT2FollowUpEmails() {
 
         // Update
         sheet.getRange(i + 1, 5).setValue(true);
-        sheet.getRange(i + 1, 8).setValue(""); // Clear Error
+        // 清除錯誤訊息 (移位到 I 欄 / Index 9)
+        sheet.getRange(i + 1, 9).setValue("");
         console.log(`Sent: ${email}`);
 
         // 成功發送才扣除
@@ -317,7 +338,8 @@ function sendT2FollowUpEmails() {
 
       } catch (e) {
         console.error(`Failed ${email}: ${e}`);
-        sheet.getRange(i + 1, 8).setValue("失敗: " + e.toString());
+        // 寫入錯誤訊息到 I 欄
+        sheet.getRange(i + 1, 9).setValue("失敗: " + e.toString());
       }
     }
   }
@@ -357,7 +379,18 @@ function processPhase2Submit(e) {
     let colVerifyIdx = findHeaderIndex(headers, CONFIG.HEADER_T2_VERIFY);
     const verifyCode = (colVerifyIdx > -1) ? rowValues[colVerifyIdx] : rowValues[2]; // Fallback to C
 
-    console.log(`T2 Data - Email: ${emailT2}, VerifyCode: ${verifyCode}`);
+    // [修改點 1] 3. 找「配對編號」欄位 (生日+手機)
+    // 透過完整關鍵字找比較保險，因為題目很長
+    let colMatchIdIdx = findHeaderIndex(headers, "出生月份日期及手機末3碼");
+    // Fallback: 如果找不到完整標題，找部分關鍵字
+    if (colMatchIdIdx === -1) colMatchIdIdx = findHeaderIndex(headers, CONFIG.HEADER_PHONE);
+
+    let matchIdT2 = "";
+    if (colMatchIdIdx > -1) {
+      matchIdT2 = String(rowValues[colMatchIdIdx]).replace(/\D/g, "");
+    }
+
+    console.log(`T2 Data - Email: ${emailT2}, VerifyCode: ${verifyCode}, MatchID: ${matchIdT2}`);
 
     // 解析 Verify Code: UID_Timestamp
     let uidFromCode = "";
@@ -372,7 +405,7 @@ function processPhase2Submit(e) {
       uidFromCode = String(verifyCode).split("_")[0];
     }
 
-    // 計算 Duration
+    // 計算 Duration (使用 T2 A欄(Submit) - C欄(Verify Code Timestamp))
     const submitTime = new Date(rowValues[0]); // A欄
     let durationSec = 0;
     if (clickTimestamp > 0) {
@@ -382,7 +415,16 @@ function processPhase2Submit(e) {
     // 格式化 Duration (例如: 5分30秒)
     const mins = Math.floor(durationSec / 60);
     const secs = Math.floor(durationSec % 60);
-    const durationStr = `${mins}分${secs}秒`;
+    let durationStr = `${mins}分${secs}秒`;
+    if (durationSec <= 0) durationStr = "N/A";
+
+    // [修改點 2] 將時長回寫到「第二階段」Sheet 的 AP 欄位 (第 42 欄)
+    try {
+      sheetT2.getRange(rowIdx, 42).setValue(durationStr);
+      console.log(`Wrote Duration to Phase 2 Sheet Col AP: ${durationStr}`);
+    } catch (e) {
+      console.error("Write Duration Step Failed: " + e.toString());
+    }
 
     // 三合一比對 Tracking_Log
     const trackingData = sheetTracking.getDataRange().getValues();
@@ -392,14 +434,17 @@ function processPhase2Submit(e) {
 
     for (let i = 1; i < trackingData.length; i++) {
       const tRow = trackingData[i];
-      const tUid = String(tRow[1]);
-      const tEmail = String(tRow[2]);
+      const tUid = String(tRow[1]); // B
+      const tEmail = String(tRow[2]); // C
+      const tMatchId = String(tRow[3]); // D
 
       let isMatch = false;
-      // 比對 UID
+      // 1. 比對 UID
       if (uidFromCode && tUid && uidFromCode.trim() === tUid.trim()) isMatch = true;
-      // 比對 Email
+      // 2. 比對 Email
       if (!isMatch && emailT2 && tEmail && emailT2.trim() === tEmail.trim()) isMatch = true;
+      // 3. 比對 Match ID (手機+生日)
+      if (!isMatch && matchIdT2 && tMatchId && matchIdT2 === tMatchId) isMatch = true;
 
       if (isMatch) {
         matchedRowIndex = i + 1; // 1-based index
