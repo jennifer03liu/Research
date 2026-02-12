@@ -222,13 +222,16 @@ function processPhase1Submit(e) {
       matchId = (birthStr + phoneStr).replace(/\D/g, "");
     }
 
+    // 補零：若因試算表轉數值導致變 6 碼 (例如 0101... 變 101...)，補回 0
+    if (matchId.length === 6) matchId = "0" + matchId;
+
     // 寫入 Tracking_Log
     const timestamp = rowValues[0] || new Date(); // 若抓不到時間就用現在時間
     sheetTracking.appendRow([
       timestamp,
       uidVal,
       email,
-      matchId,
+      "'" + matchId, // 強制轉為文字格式，避免 0 開頭被消失
       false, // E: Sent
       "",    // F: T2 Time
       "",    // G: Duration
@@ -278,20 +281,26 @@ function sendT2FollowUpEmails() {
     const t1Date = new Date(row[0]);
     const uid = row[1];
     const email = row[2];
-    const matchId = row[3];
-    const isSent = row[4]; // E
+    const matchId = String(row[3]).replace(/^'/, ""); // 去除可能存在的單引號
+    const isSent = String(row[4]).toLowerCase() === "true"; // E: Sent (First Email)
+    const t2Time = row[5]; // F: T2 Time (是否已填寫)
+    const reminderCount = Number(row[10]) || 0; // K: Reminder Count (Index 10) -> 改為數字
 
     if (!t1Date || isNaN(t1Date.getTime())) continue;
-    if (String(isSent).toLowerCase() === "true") continue;
+
+    // 如果已經填寫完畢 (F 欄有值)，就不再寄信
+    if (t2Time && String(t2Time).trim() !== "") continue;
 
     const t1PureDate = new Date(t1Date);
     t1PureDate.setHours(0, 0, 0, 0);
     const diffTime = today - t1PureDate;
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-    if (diffDays >= 28) {
-      const link = `${CONFIG.T2_REDIRECT_URL}?uid=${uid}&email=${encodeURIComponent(email)}&verify=${matchId}`;
+    // 產生專屬連結
+    const link = `${CONFIG.T2_REDIRECT_URL}?uid=${uid}&email=${encodeURIComponent(email)}&verify=${matchId}`;
 
+    // 情境 A: 滿 28 天，且尚未寄送第一封信
+    if (diffDays >= 28 && !isSent) {
       try {
         MailApp.sendEmail({
           to: email,
@@ -327,21 +336,69 @@ function sendT2FollowUpEmails() {
           `
         });
 
-        // Update
-        sheet.getRange(i + 1, 5).setValue(true);
-        // 清除錯誤訊息 (移位到 I 欄 / Index 9)
-        sheet.getRange(i + 1, 9).setValue("");
-        console.log(`Sent: ${email}`);
+        // Update Status
+        sheet.getRange(i + 1, 5).setValue(true); // E: Sent = TRUE
 
-        // 成功發送才扣除
+        // [新增] 寫入完整連結到 J 欄 (Index 10)
+        sheet.getRange(i + 1, 10).setValue(link);
+
+        // 清除錯誤訊息
+        sheet.getRange(i + 1, 9).setValue("");
+        console.log(`Sent 1st Email: ${email}`);
+
         quota--;
 
       } catch (e) {
-        console.error(`Failed ${email}: ${e}`);
-        // 寫入錯誤訊息到 I 欄
-        sheet.getRange(i + 1, 9).setValue("失敗: " + e.toString());
+        console.error(`Failed 1st Email ${email}: ${e}`);
+        sheet.getRange(i + 1, 9).setValue("1st Email Err: " + e.toString());
       }
     }
+    // 情境 B: 滿 31 天 (三天後)，尚未填寫，且尚未寄送提醒信
+    else if (diffDays >= 31 && isSent && !isReminderSent) {
+      try {
+        MailApp.sendEmail({
+          to: email,
+          subject: "【溫馨提醒】第二階段問卷邀請 - 職涯發展研究",
+          name: CONFIG.EMAIL_SENDER_NAME,
+          htmlBody: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <h3 style="color: #c0392b;">職涯發展研究 - 第二階段問卷提醒</h3>
+              <p>親愛的職場夥伴，您好：</p>
+              <p>幾天前寄發了第二階段問卷邀請，目前尚未收到您的回覆。</p>
+              <p>您的參與對於本研究非常重要，這份問卷約需 10 分鐘完成。若您這幾天比較忙碌，懇請您撥空填寫，非常感謝！</p>
+              
+              <br>
+              <div style="text-align: center;">
+                <a href="${link}" style="background-color: #ef4444; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
+                  前往填寫第二階段問卷
+                </a>
+              </div>
+              <br>
+              <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製連結：<br>${link}</p>
+              <br>
+              <div style="text-align: right;">
+                國立中山大學人力資源管理研究所<br>
+                研究生：劉人瑄 敬上
+              </div>
+            </div>
+          `
+        });
+
+        // Update Status
+        sheet.getRange(i + 1, 11).setValue(true); // K: Reminder Sent = TRUE (Index 11)
+
+        // 確保連結也有寫入 (若之前漏掉)
+        sheet.getRange(i + 1, 10).setValue(link);
+
+        console.log(`Sent Reminder Email: ${email}`);
+        quota--;
+
+      } catch (e) {
+        console.error(`Failed Reminder Email ${email}: ${e}`);
+        sheet.getRange(i + 1, 9).setValue("Reminder Email Err: " + e.toString());
+      }
+    }
+
   }
 }
 
@@ -389,6 +446,9 @@ function processPhase2Submit(e) {
     if (colMatchIdIdx > -1) {
       matchIdT2 = String(rowValues[colMatchIdIdx]).replace(/\D/g, "");
     }
+
+    // 補零：若 P2 回應表也掉 0，補回
+    if (matchIdT2.length === 6) matchIdT2 = "0" + matchIdT2;
 
     console.log(`T2 Data - Email: ${emailT2}, VerifyCode: ${verifyCode}, MatchID: ${matchIdT2}`);
 
@@ -456,7 +516,8 @@ function processPhase2Submit(e) {
 
     if (matchedRowIndex > -1) {
       // F: T2完成時間, G: Duration
-      sheetTracking.getRange(matchedRowIndex, 6).setValue(submitTime);
+      const formattedTime = Utilities.formatDate(submitTime, "GMT+8", "yyyy/MM/dd HH:mm:ss");
+      sheetTracking.getRange(matchedRowIndex, 6).setValue("'" + formattedTime); // 強制轉字串
       sheetTracking.getRange(matchedRowIndex, 7).setValue(durationStr);
       console.log(`Updated Tracking_Log Row ${matchedRowIndex} with Duration ${durationStr}`);
     } else {
