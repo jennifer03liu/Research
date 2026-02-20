@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>職涯發展調查 T3 (跳轉中)</title>
+    <style>
+        body {
+            font-family: 'Montserrat', 'Noto Sans TC', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: #121826;
+            color: #E2E8F0;
+            flex-direction: column;
+        }
+
+        .spinner {
+            border: 4px solid #334155;
+            border-top: 4px solid #38BDF8;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="spinner"></div>
+    <div style="text-align: center;">
+        <h3>正在為您建立第三階段專屬問卷...</h3>
+        <p style="opacity: 0.7; font-size: 0.9em;">系統自動帶入資料中，請稍候</p>
+    </div>
+
+    <script>
+        // ================= CONFIGURATION (請修改這裡) =================
+
+        // 1. T3 Google Form 網址
+        const T3_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfwS4XWEqCtby6L_px0x-EUH4dXFekCQkwqgT1OYmJwUnjRZg/viewform";
+
+        // 2. Google Form 欄位對應 ID (來自 T3 問卷的擷取)
+        const FORM_ENTRIES = {
+            MATCH_CODE: "entry.701942597",       // [必填] 配對流水號欄位
+            EMAIL: "entry.179825483",       // [預填] Email (聯絡資訊與配對確認)
+            BIRTH_PHONE_COMBINED: "entry.1393195182" // [預填] 生日後4碼+手機後3碼 (合併題)
+        };
+
+        // 3. GAS 後端網址 (用於記錄點擊)
+        const GAS_API_URL = "https://script.google.com/macros/s/AKfycbwkziN92AA0J4JX-lH2af8smTSJLDEqw_6f1fV8Bv3fe49Tmd3QpaqoZTf3ZqIUFzjc/exec";
+
+        // =============================================================
+
+        (function () {
+            // 1. 從網址取得參數
+            const params = new URLSearchParams(window.location.search);
+            const uid = params.get('uid');
+
+            // 2. 救援模式 (Rescue Mode)
+            // 如果網址沒有 uid (使用者自己誤刪，或重新整理遺失)，則進入救援模式
+            // 生成格式: RXXX-XXXX (R開頭，後面接3碼，中間橫線，再4碼)
+            const isRescue = !uid;
+
+            function generateRandomCode(length) {
+                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                let result = '';
+                for (let i = 0; i < length; i++) {
+                    result += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return result;
+            }
+
+            // 強制以 'R' 開頭，避免與 Google Sheet 生成的代碼 (S開頭或其他) 重複
+            const finalUid = uid || `R${generateRandomCode(3)}-${generateRandomCode(4)}`;
+
+            // 2. 取得其他預填資料
+            // 這裡抓取 verify 參數 (應包含 生日+手機 組合字串)
+            // 為了相容性，同時檢查 'verify' 和 'phone' 參數
+            const inputData = {
+                email: params.get('email') || "",
+                verify_str: params.get('verify') || params.get('phone') || ""
+            };
+
+            // 3. 產生時間戳記
+            const timestamp = Math.floor(Date.now() / 1000);
+
+            // 4. 組合複合代碼: [身分ID]_[時間戳]
+            const compositeCode = `${finalUid}_${timestamp}`;
+
+            // 5. 組合 Google Form 網址參數
+            const formParams = new URLSearchParams();
+            formParams.append("usp", "pp_url");
+
+            // 填入配對碼
+            formParams.append(FORM_ENTRIES.MATCH_CODE, compositeCode);
+
+            // 填入 Email
+            if (inputData.email && FORM_ENTRIES.EMAIL) formParams.append(FORM_ENTRIES.EMAIL, inputData.email);
+
+            // 填入 合併驗證碼 (生日+手機)
+            if (inputData.verify_str && FORM_ENTRIES.BIRTH_PHONE_COMBINED) {
+                formParams.append(FORM_ENTRIES.BIRTH_PHONE_COMBINED, inputData.verify_str);
+            }
+
+            const finalUrl = `${T3_FORM_URL}?${formParams.toString()}`;
+
+            // (新增) 6. 發送點擊紀錄給 GAS
+            if (uid && GAS_API_URL) {
+                try {
+                    fetch(GAS_API_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        keepalive: true,
+                        body: JSON.stringify({
+                            type: 'T3_CLICK',
+                            code: uid,
+                            email: inputData.email || "",
+                            timestamp: new Date().toISOString()
+                        })
+                    });
+                } catch (e) { console.error("Log failed", e); }
+            }
+
+            // 7. 執行跳轉
+            setTimeout(() => {
+                window.location.replace(finalUrl);
+            }, 800);
+        })();
+    </script>
+</body>
+
+</html>

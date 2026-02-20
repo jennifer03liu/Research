@@ -32,18 +32,20 @@ const CONFIG = {
   HEADER_BIRTH: "出生月份日期",                // 生日欄位關鍵字 (若分開)
   HEADER_CUSTOM_UID: "Custom_UID",           // 用於 Phase 1 的 BF 欄位名稱 (若沒有標題預設找最後一欄)
 
-  // T2 相關
+  // T2/T3 相關
   HEADER_T2_VERIFY: "配對",                   // T2 的 驗證碼/配對編號 欄位關鍵字
 
-  // 3. T2 問卷產生器網址
+  // 3. 問卷產生器網址
   T2_REDIRECT_URL: "https://jennifer03liu.github.io/Research/T2_Survey_Redirect.html",
+  T3_REDIRECT_URL: "https://jennifer03liu.github.io/Research/T3_Survey_Redirect.html",
 
   // T1 問卷設定 (用於記錄完整網址)
   T1_FORM_URL: "https://docs.google.com/forms/d/e/1FAIpQLScfi6G7InS212ZMIeu5Yx5rEO1OX0bWKGSZo-iVnm1OWQeCPQ/viewform",
   T1_ENTRY_ID: "entry.701942597",
 
   // 4. Email 寄件設定
-  EMAIL_SUBJECT: "【問卷填寫邀請】第二階段 - 職涯發展研究",
+  EMAIL_SUBJECT_T2: "【問卷填寫邀請】第二階段 - 職涯發展研究",
+  EMAIL_SUBJECT_T3: "【問卷填寫邀請】第三階段 - 職涯發展研究 (最終回)",
   EMAIL_SENDER_NAME: "劉人瑄Jennifer(國立中山大學人管所學術研究)",
   ADMIN_EMAIL: "jennifer03liu@gmail.com,jenniferliu@trendforce.com" // [新增] 用於接收錯誤通知
 };
@@ -65,6 +67,8 @@ function onFormSubmitRouter(e) {
     processPhase1Submit(e);
   } else if (name === CONFIG.SHEET_NAME_PHASE2) {
     processPhase2Submit(e);
+  } else if (name === CONFIG.SHEET_NAME_PHASE3) {
+    processPhase3Submit(e);
   }
 }
 
@@ -87,10 +91,24 @@ function doPost(e) {
     const uid = data.code || Utilities.getUuid();
     const timestamp = new Date();
 
-    // 判斷是 T1 點擊 還是 T2 點擊 (記錄點開時間)
-    if (data.type === 'T2_CLICK') {
+    // 判斷是 T1, T2 還是 T3 點擊 (記錄點開時間)
+    const sheetTracking = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME_TRACKING_LOG);
+
+    if (data.type === 'T3_CLICK') {
+      if (sheetTracking) {
+        const tData = sheetTracking.getDataRange().getValues();
+        for (let i = 1; i < tData.length; i++) {
+          if (String(tData[i][1]) === String(uid)) {
+            // T3 點擊時間寫入 O 欄 (Index 14)
+            sheetTracking.getRange(i + 1, 15).setValue(timestamp);
+            break;
+          }
+        }
+      }
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", mode: "T3" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (data.type === 'T2_CLICK') {
       // --- 處理 T2 點擊 ---
-      const sheetTracking = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME_TRACKING_LOG);
       if (sheetTracking) {
         const tData = sheetTracking.getDataRange().getValues();
         // 找尋對應的 UID (在 Col B / Index 1)
@@ -232,10 +250,20 @@ function processPhase1Submit(e) {
       uidVal,
       email,
       "'" + matchId, // 強制轉為文字格式，避免 0 開頭被消失
-      false, // E: Sent
+      false, // E: T2_Sent
       "",    // F: T2 Time
-      "",    // G: Duration
-      ""     // H: T2 Click Time (由 doPost 預填)
+      "",    // G: T2 Duration
+      "",    // H: T2 Click Time 
+      "",    // I: 推薦人 or 其他資訊
+      "",    // J: T2 連結
+      "",    // K: T2 二次提醒
+      false, // L: T3_Sent
+      "",    // M: T3 Time
+      "",    // N: T3 Duration
+      "",    // O: T3 Click Time 
+      "",    // P: T3 連結
+      "",    // Q: T3 二次提醒
+      ""     // R: Error Log
     ]);
     console.log("Successfully synced to Tracking_Log");
 
@@ -248,13 +276,13 @@ function processPhase1Submit(e) {
 }
 
 /**
- * 功能 3: 每日寄信 (優化版)
+ * 功能 3: 每日寄信 (排程任務)
+ * 統一處理 T2 與 T3 的邀請信與提醒信，並加入 Quota 控管
  */
-function sendT2FollowUpEmails() {
+function sendDailyFollowUpEmails() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME_TRACKING_LOG);
   if (!sheet) return;
 
-  // 優化 1: 迴圈外只抓一次額度
   let quota = MailApp.getRemainingDailyQuota();
   if (quota < 10) {
     MailApp.sendEmail(CONFIG.ADMIN_EMAIL, "GAS 額度警報", `今日額度不足 (${quota})，停止寄送。`);
@@ -265,143 +293,264 @@ function sendT2FollowUpEmails() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // i=1 start
+  // 收集並排序所有需要發送的信件
+  const pendingEmails = [];
+
   for (let i = 1; i < data.length; i++) {
-    // 優化 2: 用本地變數判斷，不重複呼叫 API
-    if (quota <= 1) {
-      console.log(`今日額度用盡 (剩餘 ${quota})，停止發送。目前停在第 ${i} 筆資料，下次排程會接續執行。`);
-      break;
-    }
-
     const row = data[i];
-
-    // 優化 3: 快速過濾無效列 (大幅節省時間)
     if (!row[0] || !row[1] || !row[2]) continue;
 
     const t1Date = new Date(row[0]);
-    const uid = row[1];
-    const email = row[2];
-    const matchId = String(row[3]).replace(/^'/, ""); // 去除可能存在的單引號
-    const isSent = String(row[4]).toLowerCase() === "true"; // E: Sent (First Email)
-    const t2Time = row[5]; // F: T2 Time (是否已填寫)
-    const reminderCount = Number(row[10]) || 0; // K: Reminder Count (Index 10) -> 改為數字
-    const isReminderSent = String(row[10]).toLowerCase() === "true" || reminderCount > 0;
-
     if (!t1Date || isNaN(t1Date.getTime())) continue;
 
-    // 如果已經填寫完畢 (F 欄有值)，就不再寄信
-    if (t2Time && String(t2Time).trim() !== "") continue;
+    const uid = row[1];
+    const email = row[2];
+    const matchId = String(row[3]).replace(/^'/, "");
+
+    // Phase 2 Variables
+    const t2Sent = String(row[4]).toLowerCase() === "true"; // E: T2_Sent
+    const t2TimeRaw = row[5]; // F: T2 Time
+    const t2Time = (t2TimeRaw && String(t2TimeRaw).trim() !== "") ? new Date(t2TimeRaw) : null;
+    const t2ReminderCount = Number(row[10]) || 0; // K: T2 二次提醒
+
+    // Phase 3 Variables
+    const t3Sent = String(row[11]).toLowerCase() === "true"; // L: T3_Sent
+    const t3TimeRaw = row[12]; // M: T3 Time
+    const t3Time = (t3TimeRaw && String(t3TimeRaw).trim() !== "") ? new Date(t3TimeRaw) : null;
+    const t3ReminderCount = Number(row[16]) || 0; // Q: T3 二次提醒
 
     const t1PureDate = new Date(t1Date);
     t1PureDate.setHours(0, 0, 0, 0);
-    const diffTime = today - t1PureDate;
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const diffDaysFromT1 = Math.floor((today - t1PureDate) / (1000 * 60 * 60 * 24));
 
-    // 產生專屬連結
-    const link = `${CONFIG.T2_REDIRECT_URL}?uid=${uid}&email=${encodeURIComponent(email)}&verify=${matchId}`;
-
-    // 情境 A: 滿 28 天，且尚未寄送第一封信
-    if (diffDays >= 28 && !isSent) {
-      try {
-        MailApp.sendEmail({
-          to: email,
-          subject: CONFIG.EMAIL_SUBJECT,
-          name: CONFIG.EMAIL_SENDER_NAME,
-          htmlBody: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-              <h3 style="color: #2c3e50;">職涯發展研究 - 第二階段問卷 (2/3)｜加油，填完這次旅程即過半！</h3>
-              <p>親愛的職場夥伴，歡迎回來！</p>
-              <p>再次感謝您參與這項關於職涯發展的長期研究。</p>
-              
-              <p><span style="background-color: #fef08a; font-weight: bold; padding: 2px 5px;">本研究共需完整填答三次。這是第 2 次，完成本次問卷後，再完成 28 天後的最後一次追蹤，即具備 500元 7-11 禮券 抽獎資格！</span></p>
-              <p>此次填答約需 10 分鐘，為了能準確連結您的資料，請務必使用與上次相同的 <strong>Email</strong> 與 <strong>生日月日+手機末三碼共七碼</strong> 驗證。</p>
-              <p>匿名與保密：本問卷採嚴格匿名制，所有數據僅供學術統計分析使用，絕不對外公開或用於任何商業用途，請您依照真實感受安心填答。</p>
-              <br>
-              <div style="text-align: center;">
-                <a href="${link}" style="background-color: #3b82f6; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
-                  填寫第二階段問卷
-                </a>
-              </div>
-              <br>
-              <p style="font-size: 14px; color: #666;">(本連結已包含您的專屬辨識碼，點擊後請直接填寫，勿修改「配對編號」欄位)</p>
-              <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製連結：<br>${link}</p>
-              <br>
-              <p>謝謝您的填寫，並祝福您馬年行大運!</p>
-              <br>
-              <div style="text-align: right;">
-                國立中山大學人力資源管理研究所<br>
-                指導教授：王豫萱 博士<br>
-                研究生：劉人瑄 敬上
-              </div>
-            </div>
-          `
-        });
-
-        // Update Status
-        sheet.getRange(i + 1, 5).setValue(true); // E: Sent = TRUE
-
-        // [新增] 寫入完整連結到 J 欄 (Index 10)
-        sheet.getRange(i + 1, 10).setValue(link);
-
-        // 清除錯誤訊息
-        sheet.getRange(i + 1, 9).setValue("");
-        console.log(`Sent 1st Email: ${email}`);
-
-        quota--;
-
-      } catch (e) {
-        console.error(`Failed 1st Email ${email}: ${e}`);
-        sheet.getRange(i + 1, 9).setValue("1st Email Err: " + e.toString());
-      }
+    // ==========================================
+    // 檢查 1: T2 首次邀請 (滿 28 天)
+    // ==========================================
+    if (diffDaysFromT1 >= 28 && !t2Sent && !t2Time) {
+      pendingEmails.push({
+        priority: 1, type: "T2_INVITE", rowIndex: i + 1, email: email, uid: uid, matchId: matchId
+      });
+      continue; // 這個人當天只寄一封
     }
-    // 情境 B: 滿 31 天 (三天後)，尚未填寫，且符合每 3 天寄送一次的頻率
-    else if (diffDays >= 31 && isSent && diffDays >= 31 + (reminderCount * 3)) {
-      try {
-        MailApp.sendEmail({
-          to: email,
-          subject: `【溫馨提醒】第二階段問卷邀請 - 職涯發展研究${reminderCount > 0 ? " (" + (reminderCount + 1) + ")" : ""}`,
-          name: CONFIG.EMAIL_SENDER_NAME,
-          htmlBody: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-              <h3 style="color: #c0392b;">職涯發展研究 - 第二階段問卷提醒</h3>
-              <p>親愛的職場夥伴，您好：</p>
-              <p>幾天前寄發了第二階段問卷邀請，目前尚未收到您的回覆。</p>
-              <p>您的參與對於本研究非常重要，這份問卷約需 10 分鐘完成。若您這幾天比較忙碌，懇請您撥空填寫，非常感謝！</p>
-              
-              <br>
-              <div style="text-align: center;">
-                <a href="${link}" style="background-color: #ef4444; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
-                  前往填寫第二階段問卷
-                </a>
-              </div>
-              <br>
-              <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製連結：<br>${link}</p>
-              <br>
-              <div style="text-align: right;">
-                國立中山大學人力資源管理研究所<br>
-                研究生：劉人瑄 敬上
-              </div>
-            </div>
-          `
+
+    // ==========================================
+    // 檢查 2: T3 首次邀請 (T2 填完滿 28 天)
+    // ==========================================
+    if (t2Time && !t3Sent && !t3Time) {
+      const t2PureDate = new Date(t2Time);
+      t2PureDate.setHours(0, 0, 0, 0);
+      const diffDaysFromT2 = Math.floor((today - t2PureDate) / (1000 * 60 * 60 * 24));
+
+      if (diffDaysFromT2 >= 28) {
+        pendingEmails.push({
+          priority: 2, type: "T3_INVITE", rowIndex: i + 1, email: email, uid: uid, matchId: matchId
         });
-
-        // Update Status: Increment Reminder Count
-        const newCount = reminderCount + 1;
-        sheet.getRange(i + 1, 11).setValue(newCount); // K: Reminder Count = 數字
-
-        // 確保連結也有寫入 (若之前漏掉)
-        sheet.getRange(i + 1, 10).setValue(link);
-
-        console.log(`Sent Reminder Email: ${email}`);
-        quota--;
-
-      } catch (e) {
-        console.error(`Failed Reminder Email ${email}: ${e}`);
-        sheet.getRange(i + 1, 9).setValue("Reminder Email Err: " + e.toString());
+        continue;
       }
     }
 
+    // ==========================================
+    // 檢查 3: T2 提醒信 (每 3 天)
+    // ==========================================
+    if (t2Sent && !t2Time && diffDaysFromT1 >= 31 + (t2ReminderCount * 3)) {
+      pendingEmails.push({
+        priority: 3, type: "T2_REMIND", rowIndex: i + 1, email: email, uid: uid, matchId: matchId, count: t2ReminderCount
+      });
+      continue;
+    }
+
+    // ==========================================
+    // 檢查 4: T3 提醒信 (每 3 天)
+    // ==========================================
+    if (t3Sent && !t3Time && t2Time) {
+      const t2PureDate = new Date(t2Time);
+      t2PureDate.setHours(0, 0, 0, 0);
+      const diffDaysFromT2 = Math.floor((today - t2PureDate) / (1000 * 60 * 60 * 24));
+
+      if (diffDaysFromT2 >= 31 + (t3ReminderCount * 3)) {
+        pendingEmails.push({
+          priority: 4, type: "T3_REMIND", rowIndex: i + 1, email: email, uid: uid, matchId: matchId, count: t3ReminderCount
+        });
+        continue;
+      }
+    }
   }
+
+  // 排序：優先處理 T2 邀請，然後 T3 邀請，再處理提醒信
+  pendingEmails.sort((a, b) => a.priority - b.priority);
+
+  console.log(`今日待發送信件總數: ${pendingEmails.length}，剩餘額度: ${quota}`);
+
+  const ERROR_COL = 18; // R 欄為錯誤紀錄
+
+  // 開始發送
+  for (const task of pendingEmails) {
+    if (quota <= 5) {
+      console.log(`額度即將耗盡 (剩餘 ${quota})，保留安全緩衝，停止發送。`);
+      break;
+    }
+
+    const { type, rowIndex, email, uid, matchId, count } = task;
+
+    try {
+      if (type === "T2_INVITE") {
+        const link = `${CONFIG.T2_REDIRECT_URL}?uid=${uid}&email=${encodeURIComponent(email)}&verify=${matchId}`;
+        sendEmailWrapper(email, CONFIG.EMAIL_SUBJECT_T2, getT2InviteBody(link));
+        sheet.getRange(rowIndex, 5).setValue(true); // E: T2_Sent
+        sheet.getRange(rowIndex, 10).setValue(link); // J: T2 連結
+        sheet.getRange(rowIndex, ERROR_COL).setValue("");
+      }
+      else if (type === "T3_INVITE") {
+        const link = `${CONFIG.T3_REDIRECT_URL}?uid=${uid}&email=${encodeURIComponent(email)}&verify=${matchId}`;
+        sendEmailWrapper(email, CONFIG.EMAIL_SUBJECT_T3, getT3InviteBody(link));
+        sheet.getRange(rowIndex, 12).setValue(true); // L: T3_Sent
+        sheet.getRange(rowIndex, 16).setValue(link); // P: T3 連結
+        sheet.getRange(rowIndex, ERROR_COL).setValue("");
+      }
+      else if (type === "T2_REMIND") {
+        const link = `${CONFIG.T2_REDIRECT_URL}?uid=${uid}&email=${encodeURIComponent(email)}&verify=${matchId}`;
+        const subject = `【溫馨提醒】第二階段問卷邀請 - 職涯發展研究${count > 0 ? " (" + (count + 1) + ")" : ""}`;
+        sendEmailWrapper(email, subject, getT2RemindBody(link));
+        sheet.getRange(rowIndex, 11).setValue(count + 1); // K: T2 二次提醒
+        sheet.getRange(rowIndex, ERROR_COL).setValue("");
+      }
+      else if (type === "T3_REMIND") {
+        const link = `${CONFIG.T3_REDIRECT_URL}?uid=${uid}&email=${encodeURIComponent(email)}&verify=${matchId}`;
+        const subject = `【溫馨提醒】第三階段問卷邀請 (最終回) - 職涯發展研究${count > 0 ? " (" + (count + 1) + ")" : ""}`;
+        sendEmailWrapper(email, subject, getT3RemindBody(link));
+        sheet.getRange(rowIndex, 17).setValue(count + 1); // Q: T3 二次提醒
+        sheet.getRange(rowIndex, ERROR_COL).setValue("");
+      }
+
+      console.log(`成功發送 [${type}] 給 ${email}`);
+      quota--;
+    } catch (e) {
+      console.error(`發送失敗 [${type}] 給 ${email}: ${e}`);
+      sheet.getRange(rowIndex, ERROR_COL).setValue(`Err [${type}]: ${e.toString()}`);
+    }
+  }
+}
+
+// ================= Email Templates =================
+
+function sendEmailWrapper(to, subject, htmlBody) {
+  MailApp.sendEmail({
+    to: to,
+    subject: subject,
+    name: CONFIG.EMAIL_SENDER_NAME,
+    htmlBody: htmlBody
+  });
+}
+
+function getT2InviteBody(link) {
+  return `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h3 style="color: #2c3e50;">職涯發展研究 - 第二階段問卷 (2/3)｜加油，填完這次旅程即過半！</h3>
+      <p>親愛的職場夥伴，歡迎回來！</p>
+      <p>再次感謝您參與這項關於職涯發展的長期研究。</p>
+      
+      <p><span style="background-color: #fef08a; font-weight: bold; padding: 2px 5px;">本研究共需完整填答三次。這是第 2 次，完成本次問卷後，再完成 28 天後的最後一次追蹤，即具備 500元 7-11 禮券 抽獎資格！</span></p>
+      <p>此次填答約需 10 分鐘，為了能準確連結您的資料，請務必使用與上次相同的 <strong>Email</strong> 與 <strong>生日月日+手機末三碼共七碼</strong> 驗證。</p>
+      <p>匿名與保密：本問卷採嚴格匿名制，所有數據僅供學術統計分析使用，絕不對外公開或用於任何商業用途，請您依照真實感受安心填答。</p>
+      <br>
+      <div style="text-align: center;">
+        <a href="${link}" style="background-color: #3b82f6; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
+          填寫第二階段問卷
+        </a>
+      </div>
+      <br>
+      <p style="font-size: 14px; color: #666;">(本連結已包含您的專屬辨識碼，點擊後請直接填寫，勿修改「配對編號」欄位)</p>
+      <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製連結：<br>${link}</p>
+      <br>
+      <p>謝謝您的填寫，並祝福您馬年行大運!</p>
+      <br>
+      <div style="text-align: right;">
+        國立中山大學人力資源管理研究所<br>
+        指導教授：王豫萱 博士<br>
+        研究生：劉人瑄 敬上
+      </div>
+    </div>
+  `;
+}
+
+function getT3InviteBody(link) {
+  return `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h3 style="color: #2c3e50;">職涯發展研究 - 第三階段問卷 (3/3)｜最終回！</h3>
+      <p>親愛的職場夥伴，歡迎回來！</p>
+      <p>感謝您的堅持與參與！這項關於職涯發展的長期研究，終於來到最後一個階段。</p>
+      
+      <p><span style="background-color: #fef08a; font-weight: bold; padding: 2px 5px;">本研究共需完整填答三次。這是最後 1 次！完成本次問卷後，您即具備 500元 7-11 禮券 抽獎資格！</span></p>
+      <p>此次填答約需 10 分鐘，為了能準確連結您的資料，請務必使用與上次相同的 <strong>Email</strong> 與 <strong>生日月日+手機末三碼共七碼</strong> 驗證。</p>
+      <br>
+      <div style="text-align: center;">
+        <a href="${link}" style="background-color: #10b981; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
+          填寫第三階段(最終回)問卷
+        </a>
+      </div>
+      <br>
+      <p style="font-size: 14px; color: #666;">(本連結已包含您的專屬辨識碼，點擊後請直接填寫，勿修改「配對編號」欄位)</p>
+      <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製連結：<br>${link}</p>
+      <br>
+      <p>再次深深感謝您的填寫與協助！我們將於近期抽出得獎者並以 Email 進行通知。</p>
+      <br>
+      <div style="text-align: right;">
+        國立中山大學人力資源管理研究所<br>
+        指導教授：王豫萱 博士<br>
+        研究生：劉人瑄 敬上
+      </div>
+    </div>
+  `;
+}
+
+function getT2RemindBody(link) {
+  return `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h3 style="color: #c0392b;">職涯發展研究 - 第二階段問卷提醒</h3>
+      <p>親愛的職場夥伴，您好：</p>
+      <p>幾天前寄發了第二階段問卷邀請，目前尚未收到您的回覆。</p>
+      <p>您的參與對於本研究非常重要，這份問卷約需 10 分鐘完成。若您這幾天比較忙碌，懇請您撥空填寫，非常感謝！</p>
+      
+      <br>
+      <div style="text-align: center;">
+        <a href="${link}" style="background-color: #ef4444; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
+          前往填寫第二階段問卷
+        </a>
+      </div>
+      <br>
+      <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製連結：<br>${link}</p>
+      <br>
+      <div style="text-align: right;">
+        國立中山大學人力資源管理研究所<br>
+        研究生：劉人瑄 敬上
+      </div>
+    </div>
+  `;
+}
+
+function getT3RemindBody(link) {
+  return `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h3 style="color: #c0392b;">職涯發展研究 - 第三階段問卷提醒 (最終回)</h3>
+      <p>親愛的職場夥伴，您好：</p>
+      <p>這項關於職涯發展研究已經來到最後階段！我們幾天前寄發了第三階段問卷邀請，目前尚未收到您的回覆。</p>
+      <p>您的完成對於本研究不可或缺，完成此問卷後即可參加抽獎活動。懇請撥空完成這最後 10 分鐘的填寫，非常感謝！</p>
+      
+      <br>
+      <div style="text-align: center;">
+        <a href="${link}" style="background-color: #ef4444; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
+          前往填寫第三階段問卷
+        </a>
+      </div>
+      <br>
+      <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製連結：<br>${link}</p>
+      <br>
+      <div style="text-align: right;">
+        國立中山大學人力資源管理研究所<br>
+        研究生：劉人瑄 敬上
+      </div>
+    </div>
+  `;
 }
 
 /**
@@ -577,4 +726,116 @@ function debugT2SpecificRow() {
     source: ss
   };
   processPhase2Submit(e);
+}
+
+/**
+ * 功能 5: 處理 T3 表單提交 (被 Router 呼叫)
+ * 三選一比對 + 計算 Duration
+ */
+function processPhase3Submit(e) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return;
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    // 建立一個 CONFIG.SHEET_NAME_PHASE3 如果沒設定就預設 "第三階段"
+    const sheetNameT3 = CONFIG.SHEET_NAME_PHASE3 || "第三階段";
+    const sheetT3 = ss.getSheetByName(sheetNameT3);
+    const sheetTracking = ss.getSheetByName(CONFIG.SHEET_NAME_TRACKING_LOG);
+
+    if (!sheetT3 || !sheetTracking) {
+      console.log("找不到 T3 回應表或 Tracking_Log");
+      return;
+    }
+
+    let range = e.range;
+    let rowIdx = range.getRow();
+    const rowValues = sheetT3.getRange(rowIdx, 1, 1, sheetT3.getLastColumn()).getValues()[0];
+    const headers = sheetT3.getRange(1, 1, 1, sheetT3.getLastColumn()).getValues()[0];
+
+    console.log(`Processing T3 Row ${rowIdx}`);
+
+    // 1. 找 Email 欄位
+    let colEmailIdxT3 = findHeaderIndex(headers, CONFIG.HEADER_EMAIL);
+    if (colEmailIdxT3 === -1) colEmailIdxT3 = findHeaderIndex(headers, "Email"); // Fallback
+    const emailT3 = (colEmailIdxT3 > -1) ? rowValues[colEmailIdxT3] : "";
+
+    // 2. 找驗證碼/配對碼 欄位
+    let colVerifyIdx = findHeaderIndex(headers, CONFIG.HEADER_T2_VERIFY);
+    const verifyCode = (colVerifyIdx > -1) ? rowValues[colVerifyIdx] : rowValues[2]; // Fallback to C
+
+    // 3. 找「配對編號」欄位 (生日+手機)
+    let colMatchIdIdx = findHeaderIndex(headers, "出生月份日期及手機末3碼");
+    if (colMatchIdIdx === -1) colMatchIdIdx = findHeaderIndex(headers, CONFIG.HEADER_PHONE);
+
+    let matchIdT3 = "";
+    if (colMatchIdIdx > -1) {
+      matchIdT3 = String(rowValues[colMatchIdIdx]).replace(/\D/g, "");
+    }
+
+    if (matchIdT3.length === 6) matchIdT3 = "0" + matchIdT3;
+
+    console.log(`T3 Data - Email: ${emailT3}, VerifyCode: ${verifyCode}, MatchID: ${matchIdT3}`);
+
+    // 解析 Verify Code: UID_Timestamp
+    let uidFromCode = "";
+    let clickTimestamp = 0;
+
+    if (verifyCode && String(verifyCode).includes("_")) {
+      const parts = String(verifyCode).split("_");
+      uidFromCode = parts[0];
+      clickTimestamp = Number(parts[1]);
+    } else if (verifyCode) {
+      uidFromCode = String(verifyCode).split("_")[0];
+    }
+
+    // 計算 Duration
+    const submitTime = new Date(rowValues[0]); // A欄
+    let durationSec = 0;
+    if (clickTimestamp > 0) {
+      durationSec = (submitTime.getTime() / 1000) - clickTimestamp;
+    }
+
+    const mins = Math.floor(durationSec / 60);
+    const secs = Math.floor(durationSec % 60);
+    let durationStr = `${mins}分${secs}秒`;
+    if (durationSec <= 0) durationStr = "N/A";
+
+    const trackingData = sheetTracking.getDataRange().getValues();
+    let matchedRowIndex = -1;
+
+    for (let i = 1; i < trackingData.length; i++) {
+      const tRow = trackingData[i];
+      const tUid = String(tRow[1]); // B
+      const tEmail = String(tRow[2]); // C
+      const tMatchId = String(tRow[3]); // D
+
+      let isMatch = false;
+      if (uidFromCode && tUid && uidFromCode.trim() === tUid.trim()) isMatch = true;
+      if (!isMatch && emailT3 && tEmail && emailT3.trim() === tEmail.trim()) isMatch = true;
+      if (!isMatch && matchIdT3 && tMatchId && matchIdT3 === tMatchId) isMatch = true;
+
+      if (isMatch) {
+        matchedRowIndex = i + 1; // 1-based index
+        console.log(`T3 Match Found at Row ${matchedRowIndex}`);
+        break;
+      }
+    }
+
+    if (matchedRowIndex > -1) {
+      // M: T3Time, N: T3 Duration
+      const formattedTime = Utilities.formatDate(submitTime, "GMT+8", "yyyy/MM/dd HH:mm:ss");
+      sheetTracking.getRange(matchedRowIndex, 13).setValue("'" + formattedTime); // M 欄
+      sheetTracking.getRange(matchedRowIndex, 14).setValue(durationStr); // N 欄
+      console.log(`Updated Tracking_Log Row ${matchedRowIndex} with T3 Duration ${durationStr}`);
+    } else {
+      console.log("No match found in Tracking_Log for T3");
+    }
+
+  } catch (e) {
+    console.error("T3 Process Error: " + e.toString());
+    MailApp.sendEmail(CONFIG.ADMIN_EMAIL, "GAS 錯誤: processPhase3Submit", e.toString());
+  } finally {
+    lock.releaseLock();
+  }
 }
