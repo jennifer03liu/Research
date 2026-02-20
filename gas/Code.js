@@ -354,12 +354,12 @@ function sendT2FollowUpEmails() {
         sheet.getRange(i + 1, 9).setValue("1st Email Err: " + e.toString());
       }
     }
-    // 情境 B: 滿 31 天 (三天後)，尚未填寫，且尚未寄送提醒信
-    else if (diffDays >= 31 && isSent && !isReminderSent) {
+    // 情境 B: 滿 31 天 (三天後)，尚未填寫，且符合每 3 天寄送一次的頻率
+    else if (diffDays >= 31 && isSent && diffDays >= 31 + (reminderCount * 3)) {
       try {
         MailApp.sendEmail({
           to: email,
-          subject: "【溫馨提醒】第二階段問卷邀請 - 職涯發展研究",
+          subject: `【溫馨提醒】第二階段問卷邀請 - 職涯發展研究${reminderCount > 0 ? " (" + (reminderCount + 1) + ")" : ""}`,
           name: CONFIG.EMAIL_SENDER_NAME,
           htmlBody: `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
@@ -385,8 +385,9 @@ function sendT2FollowUpEmails() {
           `
         });
 
-        // Update Status
-        sheet.getRange(i + 1, 11).setValue(true); // K: Reminder Sent = TRUE (Index 11)
+        // Update Status: Increment Reminder Count
+        const newCount = reminderCount + 1;
+        sheet.getRange(i + 1, 11).setValue(newCount); // K: Reminder Count = 數字
 
         // 確保連結也有寫入 (若之前漏掉)
         sheet.getRange(i + 1, 10).setValue(link);
