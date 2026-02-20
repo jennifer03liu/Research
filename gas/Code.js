@@ -276,10 +276,10 @@ function processPhase1Submit(e) {
 }
 
 /**
- * 功能 3: 每日寄信 (排程任務)
- * 統一處理 T2 與 T3 的邀請信與提醒信，並加入 Quota 控管
+ * 功能 3: 定期寄信 (每 4 小時排程執行一次)
+ * 統一處理 T2 與 T3 的邀請信與提醒信，並加入 Quota 控管與 4 小時發送區間比對
  */
-function sendDailyFollowUpEmails() {
+function sendIntervalFollowUpEmails() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEET_NAME_TRACKING_LOG);
   if (!sheet) return;
 
@@ -290,8 +290,18 @@ function sendDailyFollowUpEmails() {
   }
 
   const data = sheet.getDataRange().getValues();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const now = new Date();
+  const currentHour = now.getHours();
+
+  // 以 4 小時為一個區段 (例如 0-4, 4-8, 8-12, 12-16, 16-20, 20-24)
+  // 將目前的執行時間歸類到某個起點
+  const windowStartHour = Math.floor(currentHour / 4) * 4;
+  const windowEndHour = windowStartHour + 4; // 這裡是不包含 (也就是 < windowEndHour)
+
+  console.log(`目前排程發送區間：${windowStartHour}:00 ~ ${windowEndHour}:00 (當前時間: ${currentHour}點)`);
+
+  const todayPure = new Date(now);
+  todayPure.setHours(0, 0, 0, 0);
 
   // 收集並排序所有需要發送的信件
   const pendingEmails = [];
@@ -321,16 +331,21 @@ function sendDailyFollowUpEmails() {
 
     const t1PureDate = new Date(t1Date);
     t1PureDate.setHours(0, 0, 0, 0);
-    const diffDaysFromT1 = Math.floor((today - t1PureDate) / (1000 * 60 * 60 * 24));
+    const diffDaysFromT1 = Math.floor((todayPure - t1PureDate) / (1000 * 60 * 60 * 24));
+    const t1Hour = t1Date.getHours();
 
     // ==========================================
     // 檢查 1: T2 首次邀請 (滿 28 天)
+    // 條件: 剛好超過或等於 28 天 + 原始紀錄的時間落在目前的 4 小時區間內
+    // 若超過 28 天但漏寄 (例如額度用盡)，則只要在同一時區內也補寄
     // ==========================================
     if (diffDaysFromT1 >= 28 && !t2Sent && !t2Time) {
-      pendingEmails.push({
-        priority: 1, type: "T2_INVITE", rowIndex: i + 1, email: email, uid: uid, matchId: matchId
-      });
-      continue; // 這個人當天只寄一封
+      if (t1Hour >= windowStartHour && t1Hour < windowEndHour) {
+        pendingEmails.push({
+          priority: 1, type: "T2_INVITE", rowIndex: i + 1, email: email, uid: uid, matchId: matchId
+        });
+        continue; // 這個人當天只寄一封
+      }
     }
 
     // ==========================================
@@ -339,24 +354,30 @@ function sendDailyFollowUpEmails() {
     if (t2Time && !t3Sent && !t3Time) {
       const t2PureDate = new Date(t2Time);
       t2PureDate.setHours(0, 0, 0, 0);
-      const diffDaysFromT2 = Math.floor((today - t2PureDate) / (1000 * 60 * 60 * 24));
+      const diffDaysFromT2 = Math.floor((todayPure - t2PureDate) / (1000 * 60 * 60 * 24));
+      const t2Hour = t2Time.getHours();
 
       if (diffDaysFromT2 >= 28) {
-        pendingEmails.push({
-          priority: 2, type: "T3_INVITE", rowIndex: i + 1, email: email, uid: uid, matchId: matchId
-        });
-        continue;
+        if (t2Hour >= windowStartHour && t2Hour < windowEndHour) {
+          pendingEmails.push({
+            priority: 2, type: "T3_INVITE", rowIndex: i + 1, email: email, uid: uid, matchId: matchId
+          });
+          continue;
+        }
       }
     }
 
     // ==========================================
     // 檢查 3: T2 提醒信 (每 3 天)
+    // 提醒信不限一天只能發送幾次，但是也限縮在原本填寫的時段發送，這樣不會半夜吵人，也比較像真人
     // ==========================================
     if (t2Sent && !t2Time && diffDaysFromT1 >= 31 + (t2ReminderCount * 3)) {
-      pendingEmails.push({
-        priority: 3, type: "T2_REMIND", rowIndex: i + 1, email: email, uid: uid, matchId: matchId, count: t2ReminderCount
-      });
-      continue;
+      if (t1Hour >= windowStartHour && t1Hour < windowEndHour) {
+        pendingEmails.push({
+          priority: 3, type: "T2_REMIND", rowIndex: i + 1, email: email, uid: uid, matchId: matchId, count: t2ReminderCount
+        });
+        continue;
+      }
     }
 
     // ==========================================
@@ -365,13 +386,16 @@ function sendDailyFollowUpEmails() {
     if (t3Sent && !t3Time && t2Time) {
       const t2PureDate = new Date(t2Time);
       t2PureDate.setHours(0, 0, 0, 0);
-      const diffDaysFromT2 = Math.floor((today - t2PureDate) / (1000 * 60 * 60 * 24));
+      const diffDaysFromT2 = Math.floor((todayPure - t2PureDate) / (1000 * 60 * 60 * 24));
+      const t2Hour = t2Time.getHours();
 
       if (diffDaysFromT2 >= 31 + (t3ReminderCount * 3)) {
-        pendingEmails.push({
-          priority: 4, type: "T3_REMIND", rowIndex: i + 1, email: email, uid: uid, matchId: matchId, count: t3ReminderCount
-        });
-        continue;
+        if (t2Hour >= windowStartHour && t2Hour < windowEndHour) {
+          pendingEmails.push({
+            priority: 4, type: "T3_REMIND", rowIndex: i + 1, email: email, uid: uid, matchId: matchId, count: t3ReminderCount
+          });
+          continue;
+        }
       }
     }
   }
@@ -379,7 +403,7 @@ function sendDailyFollowUpEmails() {
   // 排序：優先處理 T2 邀請，然後 T3 邀請，再處理提醒信
   pendingEmails.sort((a, b) => a.priority - b.priority);
 
-  console.log(`今日待發送信件總數: ${pendingEmails.length}，剩餘額度: ${quota}`);
+  console.log(`本區段待發送信件總數: ${pendingEmails.length}，目前總剩餘額度: ${quota}`);
 
   const ERROR_COL = 18; // R 欄為錯誤紀錄
 
