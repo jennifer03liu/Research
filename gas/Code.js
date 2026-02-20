@@ -285,6 +285,7 @@ function sendT2FollowUpEmails() {
     const isSent = String(row[4]).toLowerCase() === "true"; // E: Sent (First Email)
     const t2Time = row[5]; // F: T2 Time (是否已填寫)
     const reminderCount = Number(row[10]) || 0; // K: Reminder Count (Index 10) -> 改為數字
+    const isReminderSent = String(row[10]).toLowerCase() === "true" || reminderCount > 0;
 
     if (!t1Date || isNaN(t1Date.getTime())) continue;
 
