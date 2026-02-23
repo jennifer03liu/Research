@@ -24,6 +24,7 @@ const CONFIG = {
   SHEET_NAME_PARTICIPANT: "受試者名單",          // [新增] 點擊紀錄
   SHEET_NAME_PHASE1: "第一階段",                // [新增] T1 表單回應
   SHEET_NAME_PHASE2: "第二階段",                // [改名] T2 表單回應 (使用者已改名)
+  SHEET_NAME_PHASE3: "第三階段",                // [新增] T3 表單回應
 
   // 2. 欄位標題關鍵字 (用於自動尋找)
   HEADER_ATTN: "這題請選擇「4」",              // 檢核題關鍵字
