@@ -626,7 +626,18 @@ function processPhase2Submit(e) {
     // 補零：若 P2 回應表也掉 0，補回
     if (matchIdT2.length === 6) matchIdT2 = "0" + matchIdT2;
 
-    console.log(`T2 Data - Email: ${emailT2}, VerifyCode: ${verifyCode}, MatchID: ${matchIdT2}`);
+    // [新增] 4. 找「這題請選擇「2」」欄位 (注意力檢測題)
+    let colAttnIdxT2 = findHeaderIndex(headers, "這題請選擇「2」");
+    let isAttnPassed = true; // 預設通過
+    if (colAttnIdxT2 > -1) {
+      let attnVal = rowValues[colAttnIdxT2];
+      // 注意力檢測必須選擇 "2"
+      if (String(attnVal).trim() !== "2") {
+        isAttnPassed = false;
+      }
+    }
+
+    console.log(`T2 Data - Email: ${emailT2}, VerifyCode: ${verifyCode}, MatchID: ${matchIdT2}, AttnPassed: ${isAttnPassed}`);
 
     // 解析 Verify Code: UID_Timestamp
     let uidFromCode = "";
@@ -691,11 +702,19 @@ function processPhase2Submit(e) {
     }
 
     if (matchedRowIndex > -1) {
-      // F: T2完成時間, G: Duration
-      const formattedTime = Utilities.formatDate(submitTime, "GMT+8", "yyyy/MM/dd HH:mm:ss");
-      sheetTracking.getRange(matchedRowIndex, 6).setValue("'" + formattedTime); // 強制轉字串
-      sheetTracking.getRange(matchedRowIndex, 7).setValue(durationStr);
-      console.log(`Updated Tracking_Log Row ${matchedRowIndex} with Duration ${durationStr}`);
+      if (isAttnPassed) {
+        // [通過測謊] F: T2完成時間, G: Duration
+        const formattedTime = Utilities.formatDate(submitTime, "GMT+8", "yyyy/MM/dd HH:mm:ss");
+        sheetTracking.getRange(matchedRowIndex, 6).setValue("'" + formattedTime); // 強制轉字串
+        sheetTracking.getRange(matchedRowIndex, 7).setValue(durationStr);
+        console.log(`Updated Tracking_Log Row ${matchedRowIndex} with Duration ${durationStr}`);
+      } else {
+        // [未通過測謊] T2 答錯，防堵 T3 信件寄送。將 T3 相關欄位 L, M, N 填上 Wrong
+        sheetTracking.getRange(matchedRowIndex, 12).setValue("Wrong"); // L: T3_Sent
+        sheetTracking.getRange(matchedRowIndex, 13).setValue("Wrong"); // M: T3 Time
+        sheetTracking.getRange(matchedRowIndex, 14).setValue("Wrong"); // N: T3 Duration
+        console.log(`Updated Tracking_Log Row ${matchedRowIndex} as 'Wrong' due to failed AttnCheck`);
+      }
     } else {
       console.log("No match found in Tracking_Log");
     }
