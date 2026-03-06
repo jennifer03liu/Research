@@ -226,23 +226,23 @@ function processPhase1Submit(e) {
       return;
     }
 
-    // 組合 Match ID (修正：避免同一個欄位合併兩次)
+    // 組合 Match ID
     let colPhoneIdx = findHeaderIndex(headers, CONFIG.HEADER_PHONE);
     let colBirthIdx = findHeaderIndex(headers, CONFIG.HEADER_BIRTH);
-    let matchId = "";
+    let rawMatchId = "";
 
     if (colPhoneIdx > -1 && colPhoneIdx === colBirthIdx) {
       // 代表是同一欄 (合併題)
-      matchId = String(rowValues[colPhoneIdx]).replace(/\D/g, "");
+      rawMatchId = String(rowValues[colPhoneIdx]);
     } else {
       // 分開的欄位
       let phoneStr = (colPhoneIdx > -1) ? String(rowValues[colPhoneIdx]) : "";
       let birthStr = (colBirthIdx > -1) ? String(rowValues[colBirthIdx]) : "";
-      matchId = (birthStr + phoneStr).replace(/\D/g, "");
+      rawMatchId = birthStr + phoneStr;
     }
 
-    // 補零：若因試算表轉數值導致變 6 碼 (例如 0101... 變 101...)，補回 0
-    if (matchId.length === 6) matchId = "0" + matchId;
+    // 使用共用函式並允許 override
+    let matchId = getEffectiveMatchId(email, rawMatchId);
 
     // 寫入 Tracking_Log
     const timestamp = rowValues[0] || new Date(); // 若抓不到時間就用現在時間
@@ -618,13 +618,12 @@ function processPhase2Submit(e) {
     // Fallback: 如果找不到完整標題，找部分關鍵字
     if (colMatchIdIdx === -1) colMatchIdIdx = findHeaderIndex(headers, CONFIG.HEADER_PHONE);
 
-    let matchIdT2 = "";
+    let rawMatchIdT2 = "";
     if (colMatchIdIdx > -1) {
-      matchIdT2 = String(rowValues[colMatchIdIdx]).replace(/\D/g, "");
+      rawMatchIdT2 = String(rowValues[colMatchIdIdx]);
     }
 
-    // 補零：若 P2 回應表也掉 0，補回
-    if (matchIdT2.length === 6) matchIdT2 = "0" + matchIdT2;
+    let matchIdT2 = getEffectiveMatchId(emailT2, rawMatchIdT2);
 
     // [新增] 4. 找「這題請選擇「2」」欄位 (注意力檢測題)
     let colAttnIdxT2 = findHeaderIndex(headers, "這題請選擇「2」");
@@ -812,12 +811,12 @@ function processPhase3Submit(e) {
     let colMatchIdIdx = findHeaderIndex(headers, "出生月份日期及手機末3碼");
     if (colMatchIdIdx === -1) colMatchIdIdx = findHeaderIndex(headers, CONFIG.HEADER_PHONE);
 
-    let matchIdT3 = "";
+    let rawMatchIdT3 = "";
     if (colMatchIdIdx > -1) {
-      matchIdT3 = String(rowValues[colMatchIdIdx]).replace(/\D/g, "");
+      rawMatchIdT3 = String(rowValues[colMatchIdIdx]);
     }
 
-    if (matchIdT3.length === 6) matchIdT3 = "0" + matchIdT3;
+    let matchIdT3 = getEffectiveMatchId(emailT3, rawMatchIdT3);
 
     console.log(`T3 Data - Email: ${emailT3}, VerifyCode: ${verifyCode}, MatchID: ${matchIdT3}`);
 
