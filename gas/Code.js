@@ -304,6 +304,16 @@ function sendIntervalFollowUpEmails() {
   const todayPure = new Date(now);
   todayPure.setHours(0, 0, 0, 0);
 
+  // ===== 發送截止日設定 =====
+  const T2_DEADLINE = new Date(2026, 2, 31); // 2026-03-31
+  T2_DEADLINE.setHours(0, 0, 0, 0);
+  const T3_DEADLINE = new Date(2026, 4, 15); // 2026-05-15
+  T3_DEADLINE.setHours(0, 0, 0, 0);
+  const isAfterT2Deadline = todayPure > T2_DEADLINE;
+  const isT2DeadlineDay = todayPure.getTime() === T2_DEADLINE.getTime();
+  const isAfterT3Deadline = todayPure > T3_DEADLINE;
+  const isT3DeadlineDay = todayPure.getTime() === T3_DEADLINE.getTime();
+
   // 收集並排序所有需要發送的信件
   const pendingEmails = [];
 
@@ -339,9 +349,10 @@ function sendIntervalFollowUpEmails() {
     // 檢查 1: T2 首次邀請 (滿 28 天)
     // 條件: 剛好超過或等於 28 天 + 原始紀錄的時間落在目前的 4 小時區間內
     // 若超過 28 天但漏寄 (例如額度用盡)，則只要在同一時區內也補寄
+    // 截止：2026-03-31。當天無論時段，凡還沒發過 T2 者一律補發
     // ==========================================
-    if (diffDaysFromT1 >= 28 && !t2Sent && !t2Time) {
-      if (t1Hour >= windowStartHour && t1Hour < windowEndHour) {
+    if (!isAfterT2Deadline && diffDaysFromT1 >= 28 && !t2Sent && !t2Time) {
+      if (isT2DeadlineDay || (t1Hour >= windowStartHour && t1Hour < windowEndHour)) {
         pendingEmails.push({
           priority: 1, type: "T2_INVITE", rowIndex: i + 1, email: email, uid: uid, matchId: matchId
         });
@@ -351,15 +362,16 @@ function sendIntervalFollowUpEmails() {
 
     // ==========================================
     // 檢查 2: T3 首次邀請 (T2 填完滿 28 天)
+    // 截止：2026-05-15。當天無論時段，凡還沒發過 T3 者一律補發
     // ==========================================
-    if (t2Time && !t3Sent && !t3Time) {
+    if (!isAfterT3Deadline && t2Time && !t3Sent && !t3Time) {
       const t2PureDate = new Date(t2Time);
       t2PureDate.setHours(0, 0, 0, 0);
       const diffDaysFromT2 = Math.floor((todayPure - t2PureDate) / (1000 * 60 * 60 * 24));
       const t2Hour = t2Time.getHours();
 
       if (diffDaysFromT2 >= 28) {
-        if (t2Hour >= windowStartHour && t2Hour < windowEndHour) {
+        if (isT3DeadlineDay || (t2Hour >= windowStartHour && t2Hour < windowEndHour)) {
           pendingEmails.push({
             priority: 2, type: "T3_INVITE", rowIndex: i + 1, email: email, uid: uid, matchId: matchId
           });
@@ -371,8 +383,9 @@ function sendIntervalFollowUpEmails() {
     // ==========================================
     // 檢查 3: T2 提醒信 (每 3 天)
     // 提醒信不限一天只能發送幾次，但是也限縮在原本填寫的時段發送，這樣不會半夜吵人，也比較像真人
+    // 截止：2026-03-31，之後不再發提醒
     // ==========================================
-    if (t2Sent && !t2Time && diffDaysFromT1 >= 31 + (t2ReminderCount * 3)) {
+    if (!isAfterT2Deadline && t2Sent && !t2Time && diffDaysFromT1 >= 31 + (t2ReminderCount * 3)) {
       if (t1Hour >= windowStartHour && t1Hour < windowEndHour) {
         pendingEmails.push({
           priority: 3, type: "T2_REMIND", rowIndex: i + 1, email: email, uid: uid, matchId: matchId, count: t2ReminderCount
@@ -383,8 +396,9 @@ function sendIntervalFollowUpEmails() {
 
     // ==========================================
     // 檢查 4: T3 提醒信 (每 3 天)
+    // 截止：2026-05-15，之後不再發提醒
     // ==========================================
-    if (t3Sent && !t3Time && t2Time) {
+    if (!isAfterT3Deadline && t3Sent && !t3Time && t2Time) {
       const t2PureDate = new Date(t2Time);
       t2PureDate.setHours(0, 0, 0, 0);
       const diffDaysFromT2 = Math.floor((todayPure - t2PureDate) / (1000 * 60 * 60 * 24));
