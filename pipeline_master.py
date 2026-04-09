@@ -1891,7 +1891,7 @@ def run_all_mplus(inp_list, mplus_exe=None, timeout=300):
     for label, inp_path in inp_list:
         print(f"  [Mplus] {label}...", end=' ', flush=True)
         ok, out, err = run_mplus_single(inp_path, mplus_exe, timeout)
-        print('✓' if ok else f'✗ ({err})')
+        print('[OK]' if ok else f'[FAIL] ({err})')
         results.append((label, ok, out, err))
     return results
 
