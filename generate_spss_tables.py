@@ -241,6 +241,71 @@ df_cfa = pd.DataFrame([
      "[待填]","[待填]","[待填]","[待填]","[待填]","測量恆等性前提"],
 ], columns=["模型", "χ²（df）", "CFI", "TLI", "RMSEA [90% CI]", "SRMR", "備註"])
 
+# ── CH3_樣本流失_ANOVA與卡方 ─────────────────────────────────
+from scipy.stats import f_oneway, chi2_contingency
+
+g1 = df_all[df_all['Group'] == 1].copy()
+g2 = df_all[df_all['Group'] == 2].copy()
+g3 = df_all[df_all['Group'] == 3].copy()
+n1, n2, n3 = len(g1), len(g2), len(g3)
+
+def grp_scale(grp, prefix, n_items, wave='T1'):
+    cols = [f"{prefix}{i}_{wave}" for i in range(1, n_items+1)]
+    valid = [c for c in cols if c in grp.columns]
+    return grp[valid].mean(axis=1).dropna()
+
+def anova_row(label, s1, s2, s3):
+    F, p = f_oneway(s1, s2, s3)
+    stars = '***' if p < .001 else ('**' if p < .01 else ('*' if p < .05 else 'n.s.'))
+    def ms(s): return f"{s.mean():.2f} ({s.std():.2f})"
+    return [label, ms(s1), ms(s2), ms(s3), f"{F:.3f}", f"{p:.3f}", stars]
+
+# 計算各構念在三組的分佈
+age1 = g1['Age'].dropna(); age2 = g2['Age'].dropna(); age3 = g3['Age'].dropna()
+
+hp1  = grp_scale(g1,'HP',6);  hp2  = grp_scale(g2,'HP',6);  hp3  = grp_scale(g3,'HP',6)
+jcp1 = grp_scale(g1,'JCP',6); jcp2 = grp_scale(g2,'JCP',6); jcp3 = grp_scale(g3,'JCP',6)
+
+def cp_s(grp):
+    h = grp_scale(grp,'HP',6); j = grp_scale(grp,'JCP',6)
+    return pd.concat([h,j], axis=1).mean(axis=1).dropna()
+
+dp1 = grp_scale(g1,'DP',5); dp2 = grp_scale(g2,'DP',5); dp3 = grp_scale(g3,'DP',5)
+ci1 = grp_scale(g1,'CI',8); ci2 = grp_scale(g2,'CI',8); ci3 = grp_scale(g3,'CI',8)
+pp1 = grp_scale(g1,'PP',6); pp2 = grp_scale(g2,'PP',6); pp3 = grp_scale(g3,'PP',6)
+
+anova_rows = [
+    anova_row('年齡（Age）',          age1, age2, age3),
+    anova_row('職涯高原 (CP)',        cp_s(g1), cp_s(g2), cp_s(g3)),
+    anova_row('階層停滯 (HP)',        hp1, hp2, hp3),
+    anova_row('工作內容停滯 (JCP)',   jcp1, jcp2, jcp3),
+    anova_row('決策拖延 (DP)',        dp1, dp2, dp3),
+    anova_row('職涯無所作為 (CI)',    ci1, ci2, ci3),
+    anova_row('主動性人格 (PP)',      pp1, pp2, pp3),
+]
+
+df_anova = pd.DataFrame(anova_rows, columns=[
+    f"變數",
+    f"Group 1 僅 T1\n(n={n1})  M (SD)",
+    f"Group 2 T1+T2\n(n={n2})  M (SD)",
+    f"Group 3 三波完整\n(n={n3})  M (SD)",
+    "F 值", "p 值", "顯著性"])
+
+# 卡方：性別 & 教育程度
+def chi2_row(label, col):
+    ct = pd.crosstab(df_all[col], df_all['Group'].map({1:'G1',2:'G2',3:'G3'}))
+    chi2, p, dof, _ = chi2_contingency(ct)
+    stars = '***' if p < .001 else ('**' if p < .01 else ('*' if p < .05 else 'n.s.'))
+    return [label, f"{chi2:.3f}", str(dof), f"{p:.3f}", stars]
+
+chi2_rows = []
+if 'Gender' in df_all.columns:
+    chi2_rows.append(chi2_row('性別 (Gender)', 'Gender'))
+if 'Education' in df_all.columns:
+    chi2_rows.append(chi2_row('教育程度 (Education)', 'Education'))
+
+df_chi2 = pd.DataFrame(chi2_rows, columns=["變數", "χ²", "df", "p 值", "顯著性"])
+
 # ── 舊有分析表（保留）────────────────────────────────────────
 df_attrition_old = pd.DataFrame([
     ["整體職涯停滯 (CP)", "p = .355", "無顯著差異"],
@@ -262,6 +327,8 @@ with pd.ExcelWriter(EXCEL_OUT, engine='openpyxl') as writer:
     df_corr_t2.to_excel(writer,       sheet_name='CH3_相關矩陣_T2',      index=False)
     df_corr_t3.to_excel(writer,       sheet_name='CH3_相關矩陣_T3',      index=False)
     df_cfa.to_excel(writer,           sheet_name='CH3_CFA適配指標',      index=False)
+    df_anova.to_excel(writer,         sheet_name='CH3_流失ANOVA',         index=False)
+    df_chi2.to_excel(writer,          sheet_name='CH3_流失卡方',          index=False)
     df_attrition_old.to_excel(writer, sheet_name='樣本流失檢定_舊',      index=False)
 
 # ============================================================
@@ -286,6 +353,8 @@ LEFT_COLS = {
     'CH3_相關矩陣_T2':    [1],
     'CH3_相關矩陣_T3':    [1],
     'CH3_CFA適配指標':    [1, 7],
+    'CH3_流失ANOVA':      [1, 2, 3, 4],
+    'CH3_流失卡方':       [1],
     '樣本流失檢定_舊':    [1],
 }
 
