@@ -307,7 +307,7 @@ function sendIntervalFollowUpEmails() {
   // ===== 發送截止日設定 =====
   const T2_DEADLINE = new Date(2026, 2, 31); // 2026-03-31
   T2_DEADLINE.setHours(0, 0, 0, 0);
-  const T3_DEADLINE = new Date(2026, 4, 15); // 2026-05-15
+  const T3_DEADLINE = new Date(2026, 3, 12); // 2026-04-12 (已手動一次性發送，截止收卷)
   T3_DEADLINE.setHours(0, 0, 0, 0);
   const isAfterT2Deadline = todayPure > T2_DEADLINE;
   const isT2DeadlineDay = todayPure.getTime() === T2_DEADLINE.getTime();
