@@ -896,3 +896,113 @@ function processPhase3Submit(e) {
     lock.releaseLock();
   }
 }
+
+// =============================================================
+/**
+ * 一次性手動觸發：對所有「T2已填、T3未發信」的人立刻發出 T3 邀請信
+ * 使用時機：在 GAS 編輯器直接點選此函式執行即可，不受 28 天限制
+ * 截止日提醒：信中寫明 2026-04-12 前填完
+ */
+function sendT3BlastNow() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.SHEET_NAME_TRACKING_LOG);
+  if (!sheet) {
+    console.log("找不到 Tracking_Log");
+    return;
+  }
+
+  const data = sheet.getDataRange().getValues();
+  let quota = MailApp.getRemainingDailyQuota();
+  console.log(`[T3 Blast] 開始執行，目前剩餘 Gmail 每日額度: ${quota}`);
+
+  let sentCount = 0;
+  let skipCount = 0;
+  const ERROR_COL = 18; // R 欄
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (!row[0] || !row[1] || !row[2]) continue; // 跳過空白列
+
+    const uid       = String(row[1]);   // B: UID
+    const email     = String(row[2]);   // C: Email
+    const matchId   = String(row[3]).replace(/^'/, ""); // D: MatchID
+
+    const t2TimeRaw = row[5];           // F: T2 完成時間
+    const t3SentRaw = String(row[11]).toLowerCase(); // L: T3_Sent
+    const t3TimeRaw = row[12];          // M: T3 完成時間
+
+    const t2Done = t2TimeRaw && String(t2TimeRaw).trim() !== "";
+    const t3AlreadySent = t3SentRaw === "true" || t3SentRaw === "wrong";
+    const t3Done = t3TimeRaw && String(t3TimeRaw).trim() !== "";
+
+    // 條件：T2 已填 + T3 尚未發信 + T3 尚未填寫
+    if (!t2Done || t3AlreadySent || t3Done) {
+      skipCount++;
+      continue;
+    }
+
+    if (quota <= 5) {
+      console.log(`額度即將耗盡 (剩餘 ${quota})，停止發送。`);
+      break;
+    }
+
+    try {
+      const link = `${CONFIG.T3_REDIRECT_URL}?uid=${uid}&email=${encodeURIComponent(email)}&verify=${matchId}`;
+      sendEmailWrapper(email, CONFIG.EMAIL_SUBJECT_T3, getT3BlastBody(link));
+
+      sheet.getRange(i + 1, 12).setValue(true);  // L: T3_Sent = true
+      sheet.getRange(i + 1, 16).setValue(link);  // P: T3 連結
+      sheet.getRange(i + 1, ERROR_COL).setValue(""); // 清除錯誤欄
+
+      console.log(`[T3 Blast] ✅ 已發送給: ${email} (Row ${i + 1})`);
+      sentCount++;
+      quota--;
+
+    } catch (err) {
+      console.error(`[T3 Blast] ❌ 發送失敗 ${email}: ${err}`);
+      sheet.getRange(i + 1, ERROR_COL).setValue(`Blast Err: ${err.toString()}`);
+    }
+  }
+
+  const summary = `[T3 Blast 完成] 成功發送: ${sentCount} 封 | 略過(已發/已填/不符): ${skipCount} 筆 | 剩餘額度: ${quota}`;
+  console.log(summary);
+  MailApp.sendEmail(CONFIG.ADMIN_EMAIL, "[T3 Blast] 發信完成通知", summary);
+}
+
+/**
+ * T3 Blast 專用信件模板（強調 4/12 截止）
+ */
+function getT3BlastBody(link) {
+  return `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h3 style="color: #2c3e50;">職涯發展研究 - 第三階段問卷 (3/3)｜最後一步，請於 4/12 前完成！</h3>
+      <p>親愛的職場夥伴，您好：</p>
+      <p>感謝您已完成前兩階段的問卷填寫！這項關於職涯發展的長期追蹤研究，終於來到了<strong>最後一個階段</strong>。</p>
+
+      <p><span style="background-color: #fef08a; font-weight: bold; padding: 2px 5px;">
+        ⏰ 本次問卷截止日為 <strong>2026 年 4 月 12 日</strong>，完成後即具備 <strong>500 元 7-11 禮券</strong>抽獎資格！
+      </span></p>
+
+      <p>此次填答約需 10 分鐘。為了準確連結您的資料，請務必使用與前兩次相同的 <strong>Email</strong> 與 <strong>生日月日＋手機末三碼（共七碼）</strong> 進行驗證。</p>
+      <p>本問卷採嚴格匿名制，所有數據僅供學術統計分析，絕不對外公開。請依真實感受安心填答。</p>
+
+      <br>
+      <div style="text-align: center;">
+        <a href="${link}" style="background-color: #10b981; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
+          填寫第三階段（最終回）問卷
+        </a>
+      </div>
+      <br>
+      <p style="font-size: 14px; color: #666;">（本連結已包含您的專屬辨識碼，點擊後請直接填寫，勿修改「配對編號」欄位）</p>
+      <p style="font-size: 14px; color: #666;">若按鈕無法點擊，請複製下方連結：<br>${link}</p>
+      <br>
+      <p>再次深深感謝您一路以來的參與與支持，期待您完成這最後一步！</p>
+      <br>
+      <div style="text-align: right;">
+        國立中山大學人力資源管理研究所<br>
+        指導教授：王豫萱 博士<br>
+        研究生：劉人瑄 敬上
+      </div>
+    </div>
+  `;
+}
