@@ -2071,13 +2071,17 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
     all_results = {}
 
     # ---- CFA 模型 A-D ----
+    # vars_lines: 每個因子的題目分行（Mplus 每行 <90 字元限制）
+    _v_jcp = '    JCP1 JCP2 JCP3 JCP4 JCP5 JCP6'
+    _v_hp  = '    HP1  HP2  HP3  HP4  HP5  HP6'
+    _v_pp  = '    PP1  PP2  PP3  PP4  PP5  PP6'
+    _v_dp  = '    DP1  DP2  DP3  DP4  DP5'
+    _v_ci  = '    CI1  CI2  CI3  CI4  CI5  CI6  CI7  CI8'
+
     cfa_models = {
         'CFA-A (JCP+DP+CI)': {
             'fname': f'CFA_A_JCP_DP_CI_{ts}',
-            'factors': ['JCP', 'DP', 'CI'],
-            'vars': ('JCP1 JCP2 JCP3 JCP4 JCP5 JCP6 '
-                     'DP1 DP2 DP3 DP4 DP5 '
-                     'CI1 CI2 CI3 CI4 CI5 CI6 CI7 CI8'),
+            'vars_lines': f'{_v_jcp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
                 '  JCP BY JCP1* JCP2 JCP3 JCP4 JCP5 JCP6;  JCP@1;\n'
                 '  DP  BY DP1*  DP2  DP3  DP4  DP5;        DP@1;\n'
@@ -2086,10 +2090,7 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
         },
         'CFA-B (HP+DP+CI)': {
             'fname': f'CFA_B_HP_DP_CI_{ts}',
-            'factors': ['HP', 'DP', 'CI'],
-            'vars': ('HP1 HP2 HP3 HP4 HP5 HP6 '
-                     'DP1 DP2 DP3 DP4 DP5 '
-                     'CI1 CI2 CI3 CI4 CI5 CI6 CI7 CI8'),
+            'vars_lines': f'{_v_hp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
                 '  HP  BY HP1*  HP2  HP3  HP4  HP5  HP6;   HP@1;\n'
                 '  DP  BY DP1*  DP2  DP3  DP4  DP5;        DP@1;\n'
@@ -2098,11 +2099,7 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
         },
         'CFA-C (JCP+PP+DP+CI)': {
             'fname': f'CFA_C_JCP_PP_DP_CI_{ts}',
-            'factors': ['JCP', 'PP', 'DP', 'CI'],
-            'vars': ('JCP1 JCP2 JCP3 JCP4 JCP5 JCP6 '
-                     'PP1 PP2 PP3 PP4 PP5 PP6 '
-                     'DP1 DP2 DP3 DP4 DP5 '
-                     'CI1 CI2 CI3 CI4 CI5 CI6 CI7 CI8'),
+            'vars_lines': f'{_v_jcp}\n{_v_pp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
                 '  JCP BY JCP1* JCP2 JCP3 JCP4 JCP5 JCP6;  JCP@1;\n'
                 '  PP  BY PP1*  PP2  PP3  PP4  PP5  PP6;   PP@1;\n'
@@ -2112,11 +2109,7 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
         },
         'CFA-D (HP+PP+DP+CI)': {
             'fname': f'CFA_D_HP_PP_DP_CI_{ts}',
-            'factors': ['HP', 'PP', 'DP', 'CI'],
-            'vars': ('HP1 HP2 HP3 HP4 HP5 HP6 '
-                     'PP1 PP2 PP3 PP4 PP5 PP6 '
-                     'DP1 DP2 DP3 DP4 DP5 '
-                     'CI1 CI2 CI3 CI4 CI5 CI6 CI7 CI8'),
+            'vars_lines': f'{_v_hp}\n{_v_pp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
                 '  HP  BY HP1*  HP2  HP3  HP4  HP5  HP6;   HP@1;\n'
                 '  PP  BY PP1*  PP2  PP3  PP4  PP5  PP6;   PP@1;\n'
@@ -2128,17 +2121,18 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
 
     cfa_inp_list = []
     for label, cfg in cfa_models.items():
+        vl = cfg['vars_lines']
         content = (
-            f'TITLE:\n  {label} CFA (T1, N=277)\n  Generated: {ts}\n\n'
+            f'TITLE:\n  {label} CFA (T1)\n  Generated: {ts}\n\n'
             f'DATA:\n  FILE = "{cfa_dat_filename}";\n\n'
             f'VARIABLE:\n  NAMES =\n'
-            f'    HP1 HP2 HP3 HP4 HP5 HP6\n'
+            f'    HP1  HP2  HP3  HP4  HP5  HP6\n'
             f'    JCP1 JCP2 JCP3 JCP4 JCP5 JCP6\n'
-            f'    PP1 PP2 PP3 PP4 PP5 PP6\n'
-            f'    DP1 DP2 DP3 DP4 DP5\n'
-            f'    CI1 CI2 CI3 CI4 CI5 CI6 CI7 CI8;\n'
-            f'  USEVARIABLES = {cfg["vars"]};\n'
-            f'  MISSING = ALL(-999);\n\n'
+            f'    PP1  PP2  PP3  PP4  PP5  PP6\n'
+            f'    DP1  DP2  DP3  DP4  DP5\n'
+            f'    CI1  CI2  CI3  CI4  CI5  CI6  CI7  CI8;\n'
+            f'  USEVARIABLES =\n{vl};\n'
+            f'  MISSING =\n{vl} (-999);\n\n'
             f'ANALYSIS:\n  ESTIMATOR = MLR;\n\n'
             f'MODEL:\n{cfg["model_lines"]}\n'
             f'OUTPUT:\n  STDYX;\n  MODINDICES(10);\n  CINTERVAL;\n'

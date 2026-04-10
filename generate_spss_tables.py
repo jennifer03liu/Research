@@ -121,7 +121,235 @@ def corr_matrix_df(stats, n):
     return pd.DataFrame(rows, columns=["變數（M, SD）"] + labels)
 
 # ============================================================
-# 4. 解析 Attrition 數字（從 Pipeline 報告）
+# 4. Mplus .out 解析函式
+# ============================================================
+def parse_mplus_fit(out_path):
+    """從 Mplus .out 擷取適配指數 (CFI/TLI/RMSEA/SRMR/χ²/df/p)
+    格式範例（Mplus 7.4）：
+      CFI/TLI\n  CFI   0.908\n  TLI   0.894
+      RMSEA (Root...)\n  Estimate   0.068\n  90% CI  0.060  0.076
+      SRMR (...)\n  Value   0.066
+      Chi-Square Test of Model Fit\n  Value  382.810*\n  Degrees of Freedom  149
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return {}
+    with open(out_path, 'r', encoding='utf-8', errors='replace') as f:
+        text = f.read()
+    res = {}
+
+    # CFI / TLI  (after "CFI/TLI" header)
+    m = re.search(r'CFI\s+([\d.]+)', text)
+    if m:
+        try: res['CFI'] = float(m.group(1))
+        except Exception: pass
+    m = re.search(r'TLI\s+([\d.]+)', text)
+    if m:
+        try: res['TLI'] = float(m.group(1))
+        except Exception: pass
+
+    # RMSEA Estimate (line after RMSEA header)
+    m = re.search(r'RMSEA.*?Estimate\s+([\d.]+)', text, re.DOTALL | re.IGNORECASE)
+    if m:
+        try: res['RMSEA'] = float(m.group(1))
+        except Exception: pass
+
+    # RMSEA 90% CI (two numbers on same line after "90 Percent")
+    m = re.search(r'90 Percent C\.I\.\s+([\d.]+)\s+([\d.]+)', text, re.IGNORECASE)
+    if m:
+        try:
+            res['RMSEA_lo'] = float(m.group(1))
+            res['RMSEA_hi'] = float(m.group(2))
+        except Exception: pass
+
+    # SRMR Value
+    m = re.search(r'SRMR.*?Value\s+([\d.]+)', text, re.DOTALL | re.IGNORECASE)
+    if m:
+        try: res['SRMR'] = float(m.group(1))
+        except Exception: pass
+
+    # chi2 Value, df, p
+    m = re.search(r'Chi-Square Test.*?Value\s+([\d.]+)', text, re.DOTALL | re.IGNORECASE)
+    if m:
+        try: res['chi2'] = float(m.group(1))
+        except Exception: pass
+    m = re.search(r'Degrees of Freedom\s+([\d]+)', text, re.IGNORECASE)
+    if m:
+        try: res['df'] = int(m.group(1))
+        except Exception: pass
+    m = re.search(r'P-Value\s+([\d.]+)', text, re.IGNORECASE)
+    if m:
+        try: res['p_chi2'] = float(m.group(1))
+        except Exception: pass
+
+    return res
+
+
+def parse_mplus_stdyx(out_path, path_map):
+    """
+    從 Mplus .out 的 STDYX 區段擷取路徑係數。
+    path_map: { '顯示標籤': ('outcome_var', 'predictor_var') }
+    回傳 { '標籤': {'est':, 'se':, 'z':, 'p':} }
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return {}
+    with open(out_path, 'r', encoding='utf-8', errors='replace') as f:
+        text = f.read()
+    m = re.search(r'STDYX Standardization\s+(.*?)(?=\nR-SQUARE|\nSTD |\Z)', text, re.DOTALL)
+    if not m:
+        return {}
+    stdyx = m.group(1)
+    results = {}
+    for label, (outcome, predictor) in path_map.items():
+        on_m = re.search(
+            rf'{re.escape(outcome)}\s+ON\s+(.*?)(?=\n\s*\n\s*\w|\Z)',
+            stdyx, re.DOTALL | re.IGNORECASE)
+        if not on_m:
+            continue
+        row = re.search(
+            rf'\b{re.escape(predictor)}\s+([-\d.]+)\s+([\d.]+)\s+([-\d.]+)\s+([\d.]+)',
+            on_m.group(1), re.IGNORECASE)
+        if row:
+            results[label] = {
+                'est': float(row.group(1)),
+                'se':  float(row.group(2)),
+                'z':   float(row.group(3)),
+                'p':   float(row.group(4))
+            }
+    return results
+
+
+def parse_mplus_unstd(out_path, path_map):
+    """
+    從 Mplus .out 擷取非標準化估計值 b/SE/p 及 95% CI。
+    MODEL RESULTS 格式: predictor  Estimate  S.E.  Est./S.E.  P-Value
+    CI RESULTS 格式:    predictor  Lo.5%  Lo2.5%  Lo5%  Estimate  Hi5%  Hi2.5%  Hi.5%
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return {}
+    with open(out_path, 'r', encoding='utf-8', errors='replace') as f:
+        text = f.read()
+
+    # ── 取 MODEL RESULTS 區段（非標準化）──────────────────────
+    mr_start = text.find('MODEL RESULTS')
+    mr_end   = text.find('STANDARDIZED MODEL RESULTS', mr_start) if mr_start >= 0 else -1
+    mr_text  = text[mr_start:mr_end] if (mr_start >= 0 and mr_end > mr_start) else (text[mr_start:] if mr_start >= 0 else '')
+
+    # ── 取 CONFIDENCE INTERVALS OF MODEL RESULTS 區段 ──────────
+    ci_start = text.find('CONFIDENCE INTERVALS OF MODEL RESULTS')
+    ci_end   = text.find('CONFIDENCE INTERVALS OF STANDARDIZED', ci_start) if ci_start >= 0 else -1
+    ci_text  = text[ci_start:ci_end] if (ci_start >= 0 and ci_end > ci_start) else (text[ci_start:] if ci_start >= 0 else '')
+
+    def _get_on_section(full_text, outcome):
+        """Return text within 'outcome ON ...' block."""
+        m = re.search(
+            rf'{re.escape(outcome)}\s+ON\s+(.*?)(?=\n\s*\n\s*[A-Z\s]|\Z)',
+            full_text, re.DOTALL | re.IGNORECASE)
+        return m.group(1) if m else ''
+
+    results = {}
+    for label, (outcome, predictor) in path_map.items():
+        row_data = {}
+
+        # Non-standardized b, SE, p from MODEL RESULTS
+        on_mr = _get_on_section(mr_text, outcome)
+        if on_mr:
+            row = re.search(
+                rf'^\s*{re.escape(predictor)}\s+([-\d.]+)\s+([\d.]+)\s+[-\d.]+\s+([\d.]+)',
+                on_mr, re.IGNORECASE | re.MULTILINE)
+            if row:
+                row_data['b']  = float(row.group(1))
+                row_data['se'] = float(row.group(2))
+                row_data['p']  = float(row.group(3))
+
+        # 95% CI: 7 values per row → positions [1]=lo2.5%, [5]=hi2.5% (0-indexed)
+        on_ci = _get_on_section(ci_text, outcome)
+        if on_ci:
+            row2 = re.search(
+                rf'^\s*{re.escape(predictor)}\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)',
+                on_ci, re.IGNORECASE | re.MULTILINE)
+            if row2:
+                row_data['ci_lo'] = float(row2.group(2))   # Lower 2.5%
+                row_data['ci_hi'] = float(row2.group(6))   # Upper 2.5%
+                if 'b' not in row_data:
+                    row_data['b'] = float(row2.group(4))   # Estimate (fallback)
+
+        if row_data:
+            results[label] = row_data
+    return results
+
+
+def parse_multigroup_paths(out_path, path_map, group_name):
+    """
+    從多群組 Mplus .out 擷取特定群組的路徑係數。
+    先嘗試 STDYX；若未收斂，fallback 到 MODEL RESULTS（unstandardized Estimate only）。
+    回傳 { label: {'est': float, 'converged': bool} }
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return {}
+    with open(out_path, 'r', encoding='utf-8', errors='replace') as f:
+        text = f.read()
+
+    converged = 'NO CONVERGENCE' not in text and 'TERMINATED NORMALLY' in text
+
+    # Try STDYX first
+    grp_start = text.upper().find(group_name.upper())
+    stdyx = ''
+    if grp_start >= 0:
+        text_after = text[grp_start:]
+        stdyx_m = re.search(r'STDYX Standardization\s+(.*?)(?=\nR-SQUARE|\nGroup\s|\Z)',
+                            text_after, re.DOTALL)
+        if stdyx_m:
+            stdyx = stdyx_m.group(1)
+
+    # Fallback: MODEL RESULTS for this group (unstandardized)
+    mr_group = ''
+    if not stdyx and grp_start >= 0:
+        # Find next group header
+        rest = text[grp_start:]
+        next_grp = re.search(r'\nGroup\s+\w', rest[10:])
+        end_pos = next_grp.start() + 10 if next_grp else len(rest)
+        mr_group = rest[:end_pos]
+
+    results = {}
+    search_text = stdyx if stdyx else mr_group
+    if not search_text:
+        return {}
+
+    for label, (outcome, predictor) in path_map.items():
+        on_m = re.search(
+            rf'{re.escape(outcome)}\s+ON\s+(.*?)(?=\n\s*\n\s*[A-Z\s]|\Z)',
+            search_text, re.DOTALL | re.IGNORECASE)
+        if not on_m:
+            continue
+        row = re.search(
+            rf'^\s*{re.escape(predictor)}\s+([-\d.]+)',
+            on_m.group(1), re.IGNORECASE | re.MULTILINE)
+        if row:
+            results[label] = {
+                'est':       float(row.group(1)),
+                'converged': converged,
+                'stdyx':     bool(stdyx)
+            }
+    return results
+
+
+def _fmt_p(p):
+    """格式化 p 值"""
+    if p is None: return '[待填]'
+    if p < 0.001: return '< .001'
+    return f'{p:.3f}'
+
+def _fmt_est(v, digits=3):
+    if v is None: return '[待填]'
+    return f'{v:.{digits}f}'
+
+def _sig_label(p):
+    if p is None: return '[待填]'
+    return 'Yes **' if p < 0.01 else ('Yes *' if p < 0.05 else 'No (n.s.)')
+
+
+# ============================================================
+# 5. 解析 Attrition 數字（從 Pipeline 報告）
 # ============================================================
 def parse_report(path):
     with open(path, 'r', encoding='utf-8') as f:
@@ -227,19 +455,57 @@ df_corr_t1 = corr_matrix_df(s1, N)
 df_corr_t2 = corr_matrix_df(s2, N)
 df_corr_t3 = corr_matrix_df(s3, N)
 
-# ── CH3_CFA 適配指標（Mplus 跑完後填入）──────────────────────
+# ── CH3_CFA 適配指標（自動從 Mplus .out 讀取）──────────────────────
+def _cfa_out(prefix):
+    for f in os.listdir(latest_dir):
+        if f.lower().startswith(prefix.lower()) and f.lower().endswith('.out'):
+            return os.path.join(latest_dir, f)
+    return None
+
+def _fit_str(fit, key, fmt='.3f'):
+    v = fit.get(key)
+    return f'{v:{fmt}}' if v is not None else '[待填]'
+
+def _cfa_row(label, out_prefix, note):
+    out_p = _cfa_out(out_prefix)
+    fit = parse_mplus_fit(out_p) if out_p else {}
+    chi2_str = (f"{fit['chi2']:.3f}（{int(fit['df'])}）"
+                if (fit.get('chi2') is not None and fit.get('df') is not None) else '[待填]')
+    if fit.get('RMSEA') is not None:
+        lo = fit.get('RMSEA_lo')
+        hi = fit.get('RMSEA_hi')
+        rmsea_str = (f"{fit['RMSEA']:.3f} [{lo:.3f}, {hi:.3f}]"
+                     if (lo is not None and hi is not None) else f"{fit['RMSEA']:.3f}")
+    else:
+        rmsea_str = '[待填]'
+    return [label, chi2_str,
+            _fit_str(fit, 'CFI'), _fit_str(fit, 'TLI'),
+            rmsea_str, _fit_str(fit, 'SRMR'), note]
+
 df_cfa = pd.DataFrame([
-    ["M1：五因子模型\n（HP / JCP / PP / DP / CI）",
-     "[待填]","[待填]","[待填]","[待填]","[待填]","假設模型（T1）"],
-    ["M2：四因子模型\n（CP合併 / PP / DP / CI）",
-     "[待填]","[待填]","[待填]","[待填]","[待填]","比較：HP+JCP 合併"],
-    ["M3：三因子模型\n（CP / DP / CI）",
-     "[待填]","[待填]","[待填]","[待填]","[待填]","比較：排除 PP"],
-    ["M1_T2：五因子模型（T2）",
-     "[待填]","[待填]","[待填]","[待填]","[待填]","測量恆等性前提"],
-    ["M1_T3：五因子模型（T3）",
-     "[待填]","[待填]","[待填]","[待填]","[待填]","測量恆等性前提"],
-], columns=["模型", "χ²（df）", "CFI", "TLI", "RMSEA [90% CI]", "SRMR", "備註"])
+    _cfa_row('CFA-A：三因子（JCP / DP / CI）',
+             f'cfa_a_jcp_dp_ci_{ts}', '假設模型-JCP版'),
+    _cfa_row('CFA-B：三因子（HP / DP / CI）',
+             f'cfa_b_hp_dp_ci_{ts}',  '假設模型-HP版'),
+    _cfa_row('CFA-C：四因子（JCP / PP / DP / CI）',
+             f'cfa_c_jcp_pp_dp_ci_{ts}', '加入PP-JCP版'),
+    _cfa_row('CFA-D：四因子（HP / PP / DP / CI）',
+             f'cfa_d_hp_pp_dp_ci_{ts}',  '加入PP-HP版'),
+    _cfa_row('M1：五因子（HP/JCP/PP/DP/CI）',
+             f'CFA_M1_FiveFactor_{ts}', '完整五因子（T1）'),
+    _cfa_row('M2：四因子（CP合併/PP/DP/CI）',
+             f'CFA_M2_FourFactor_CP_merged_{ts}', '比較：HP+JCP合併'),
+    _cfa_row('M3：三因子（CP/DP/CI）',
+             f'CFA_M3_ThreeFactor_CP_DP_CI_{ts}', '比較：排除PP'),
+    _cfa_row('RI-CLPM A (JCP, Bidir)',
+             f'ri_clpm_a_jcp_bidir_{ts}', 'RI-CLPM 模型適配'),
+    _cfa_row('RI-CLPM B (HP, Bidir)',
+             f'ri_clpm_b_hp_bidir_{ts}', 'RI-CLPM 模型適配'),
+    _cfa_row('RI-CLPM C (JCP, MultiGroup)',
+             f'ri_clpm_c_jcp_multigrp_{ts}', 'H8 多群組模型'),
+    _cfa_row('RI-CLPM D (HP, MultiGroup)',
+             f'ri_clpm_d_hp_multigrp_{ts}', 'H8 多群組模型'),
+], columns=["模型", "χ²（df）", "CFI", "TLI", "RMSEA", "SRMR", "備註"])
 
 # ── CH3_樣本流失_ANOVA與卡方 ─────────────────────────────────
 from scipy.stats import f_oneway, chi2_contingency
@@ -306,65 +572,172 @@ if 'Education' in df_all.columns:
 
 df_chi2 = pd.DataFrame(chi2_rows, columns=["變數", "χ²", "df", "p 值", "顯著性"])
 
-# ── CH4_假設驗證結果表（Mplus 跑完後填入）───────────────────
-P = '[待填]'   # placeholder
-C = '[待填]'   # CI placeholder
+# ── CH4_假設驗證結果表（自動從 Mplus .out 填入）───────────────────
+P = '[待填]'   # fallback placeholder
+
+# 找 RI-CLPM .out 檔
+def _out(prefix):
+    p = os.path.join(latest_dir, f'{prefix}_{ts}.out'.lower())
+    if not os.path.isfile(p):
+        # 檔名可能大小寫不同
+        for f in os.listdir(latest_dir):
+            if f.lower() == f'{prefix}_{ts}.out'.lower():
+                return os.path.join(latest_dir, f)
+    return p
+
+out_A = _out('RI_CLPM_A_JCP_Bidir')
+out_B = _out('RI_CLPM_B_HP_Bidir')
+out_C = _out('RI_CLPM_C_JCP_MultiGrp')
+out_D = _out('RI_CLPM_D_HP_MultiGrp')
+
+# 路徑對應表（STDYX）
+pm_A = {
+    'H1b_JCP_DP': ('WDP2', 'WJCP1'),
+    'H2b_JCP_CI': ('WCI2', 'WJCP1'),
+    'H3_DP_CI_A': ('WCI2', 'WDP1'),
+    'H4b_DP_JCP': ('WJCP2', 'WDP1'),
+    'H5_CI_DP_A': ('WDP2', 'WCI1'),
+    'H6b_CI_JCP': ('WJCP2', 'WCI1'),
+}
+pm_B = {
+    'H1a_HP_DP':  ('WDP2', 'WHP1'),
+    'H2a_HP_CI':  ('WCI2', 'WHP1'),
+    'H3_DP_CI_B': ('WCI2', 'WDP1'),
+    'H4a_DP_HP':  ('WHP2', 'WDP1'),
+    'H5_CI_DP_B': ('WDP2', 'WCI1'),
+    'H6a_CI_HP':  ('WHP2', 'WCI1'),
+}
+pm_CJcp = {  # for multi-group paths (configural)
+    'JCP_DP': ('WDP2', 'WJCP1'),
+    'JCP_CI': ('WCI2', 'WJCP1'),
+    'DP_CI':  ('WCI2', 'WDP1'),
+    'DP_JCP': ('WJCP2', 'WDP1'),
+    'CI_DP':  ('WDP2', 'WCI1'),
+    'CI_JCP': ('WJCP2', 'WCI1'),
+}
+pm_DHp = {
+    'HP_DP':  ('WDP2', 'WHP1'),
+    'HP_CI':  ('WCI2', 'WHP1'),
+    'DP_CI':  ('WCI2', 'WDP1'),
+    'DP_HP':  ('WHP2', 'WDP1'),
+    'CI_DP':  ('WDP2', 'WCI1'),
+    'CI_HP':  ('WHP2', 'WCI1'),
+}
+
+stdyx_A = parse_mplus_stdyx(out_A, pm_A)
+stdyx_B = parse_mplus_stdyx(out_B, pm_B)
+unstd_A = parse_mplus_unstd(out_A, pm_A)
+unstd_B = parse_mplus_unstd(out_B, pm_B)
+
+# 多群組各組路徑
+n_high = int(df[df.get('PP_group', pd.Series([np.nan]*len(df))) == 1].shape[0]) if 'PP_group' in df.columns else 0
+n_low  = int(df[df.get('PP_group', pd.Series([np.nan]*len(df))) == 0].shape[0]) if 'PP_group' in df.columns else 0
+mg_high_C = parse_multigroup_paths(out_C, pm_CJcp, 'HIGHPP')
+mg_low_C  = parse_multigroup_paths(out_C, pm_CJcp, 'LOWPP')
+mg_high_D = parse_multigroup_paths(out_D, pm_DHp,  'HIGHPP')
+mg_low_D  = parse_multigroup_paths(out_D, pm_DHp,  'LOWPP')
+
+
+def _row(hyp_id, path_label, mplus_sym, model, direction, stdyx_dict, key, unstd_dict=None):
+    """Build one hypothesis row, filling in values from Mplus dicts."""
+    d   = stdyx_dict.get(key, {})
+    ud  = (unstd_dict or {}).get(key, {})
+    b   = _fmt_est(ud.get('b'),  3) if ud.get('b')  is not None else P
+    se  = _fmt_est(ud.get('se'), 3) if ud.get('se') is not None else P
+    p   = ud.get('p') if ud.get('p') is not None else d.get('p')
+    p_s = _fmt_p(p)
+    ci_lo = ud.get('ci_lo')
+    ci_hi = ud.get('ci_hi')
+    ci_s  = f'[{_fmt_est(ci_lo,3)}, {_fmt_est(ci_hi,3)}]' if (ci_lo is not None and ci_hi is not None) else f'[{P}, {P}]'
+    beta  = _fmt_est(d.get('est'), 3) if d.get('est') is not None else P
+    supp  = _sig_label(p) if p is not None else P
+    return [hyp_id, path_label, mplus_sym, model, direction, b, se, p_s, ci_s, beta, supp]
+
 
 hyp_rows = [
-    # 假設, 路徑說明, 路徑符號, 對應模型, 預測方向, b, SE, p, 95%CI, β, 支持與否
     # ── 主軸交叉延遲（Model A: JCP, Model B: HP）──
-    ['H1a', 'HP → DP\n（職涯高原→決策拖延）',
-                         'WHP → WDP',   'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H1b', 'JCP → DP\n（職涯高原→決策拖延）',
-                         'WJCP → WDP',  'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H2a', 'HP → CI\n（職涯高原→職涯無所作為）',
-                         'WHP → WCI',   'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H2b', 'JCP → CI\n（職涯高原→職涯無所作為）',
-                         'WJCP → WCI',  'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H3',  'DP → CI\n（決策拖延→職涯無所作為）',
-                         'WDP → WCI',   'Model A/B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    _row('H1a', 'HP → DP\n（職涯高原→決策拖延）',  'WHP → WDP',  'Model B', '正向（+）',
+         stdyx_B, 'H1a_HP_DP', unstd_B),
+    _row('H1b', 'JCP → DP\n（職涯高原→決策拖延）', 'WJCP → WDP', 'Model A', '正向（+）',
+         stdyx_A, 'H1b_JCP_DP', unstd_A),
+    _row('H2a', 'HP → CI\n（職涯高原→職涯無所作為）', 'WHP → WCI', 'Model B', '正向（+）',
+         stdyx_B, 'H2a_HP_CI', unstd_B),
+    _row('H2b', 'JCP → CI\n（職涯高原→職涯無所作為）','WJCP → WCI','Model A','正向（+）',
+         stdyx_A, 'H2b_JCP_CI', unstd_A),
+    _row('H3',  'DP → CI\n（決策拖延→職涯無所作為）', 'WDP → WCI', 'Model A/B','正向（+）',
+         stdyx_A, 'H3_DP_CI_A', unstd_A),
     # ── 反向交叉延遲 ──
-    ['H4a', 'DP → HP\n（決策拖延→職涯高原）',
-                         'WDP → WHP',   'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H4b', 'DP → JCP\n（決策拖延→職涯高原）',
-                         'WDP → WJCP',  'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H5',  'CI → DP\n（職涯無所作為→決策拖延）',
-                         'WCI → WDP',   'Model A/B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H6a', 'CI → HP\n（職涯無所作為→職涯高原）',
-                         'WCI → WHP',   'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H6b', 'CI → JCP\n（職涯無所作為→職涯高原）',
-                         'WCI → WJCP',  'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    # ── 中介 ──
-    ['H7a', 'HP_T1 → DP_T2 → CI_T3\n（決策拖延中介）',
-                         'Indirect',    'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H7b', 'JCP_T1 → DP_T2 → CI_T3\n（決策拖延中介）',
-                         'Indirect',    'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    # ── 主動型人格調節（多群組：高PP vs 低PP，Model C: JCP, Model D: HP）──
+    _row('H4a', 'DP → HP\n（決策拖延→職涯高原）',  'WDP → WHP',  'Model B', '正向（+）',
+         stdyx_B, 'H4a_DP_HP', unstd_B),
+    _row('H4b', 'DP → JCP\n（決策拖延→職涯高原）', 'WDP → WJCP', 'Model A', '正向（+）',
+         stdyx_A, 'H4b_DP_JCP', unstd_A),
+    _row('H5',  'CI → DP\n（職涯無所作為→決策拖延）','WCI → WDP', 'Model A/B','正向（+）',
+         stdyx_A, 'H5_CI_DP_A', unstd_A),
+    _row('H6a', 'CI → HP\n（職涯無所作為→職涯高原）','WCI → WHP', 'Model B',  '正向（+）',
+         stdyx_B, 'H6a_CI_HP', unstd_B),
+    _row('H6b', 'CI → JCP\n（職涯無所作為→職涯高原）','WCI → WJCP','Model A','正向（+）',
+         stdyx_A, 'H6b_CI_JCP', unstd_A),
+    # ── 中介（indirect — 需手動從 Mplus output 讀取） ──
+    ['H7a', 'HP_T1 → DP_T2 → CI_T3\n（決策拖延中介）', 'Indirect', 'Model B', '正向（+）',
+     P, P, P, f'[{P}, {P}]', P, P],
+    ['H7b', 'JCP_T1 → DP_T2 → CI_T3\n（決策拖延中介）','Indirect', 'Model A', '正向（+）',
+     P, P, P, f'[{P}, {P}]', P, P],
+    # ── 主動型人格調節（多群組 χ² 差異檢定） ──
     ['H8a', 'PP 調節 CP(HP)→DP、CP(HP)→CI\n（高PP路徑 < 低PP路徑）',
-                         'chi-sq diff test', 'Model D', '交互作用（調節）', P, P, P, f'[{P}, {P}]', P, P],
+     'chi-sq diff test', 'Model D', '交互作用（調節）', P, P, P, f'[{P}, {P}]', P, P],
     ['H8b', 'PP 調節 CP(JCP)→DP、CP(JCP)→CI\n（高PP路徑 < 低PP路徑）',
-                         'chi-sq diff test', 'Model C', '交互作用（調節）', P, P, P, f'[{P}, {P}]', P, P],
+     'chi-sq diff test', 'Model C', '交互作用（調節）', P, P, P, f'[{P}, {P}]', P, P],
 ]
 
 df_hyp = pd.DataFrame(hyp_rows, columns=[
     '假設', '路徑', 'Mplus 路徑符號', '對應模型', '預測方向',
     'b（非標準化）', 'SE', 'p 值', '95% CI', 'β（標準化）', '支持與否'])
 
-# ── CH4_多群組PP比較（H8：多群組 RI-CLPM，Satorra-Bentler χ² 差異檢定）──────
+# ── CH4_多群組PP比較（H8：多群組 RI-CLPM，configural 各組係數）──────
+def _mg_row(path_label, key_hp=None, key_jcp=None):
+    """Build multi-group comparison row."""
+    if 'HP' in path_label:
+        key = key_hp or path_label.replace(' ', '_').replace('→', '').replace('（', '').replace('）', '')
+        hi_d = mg_high_D.get(key, {})
+        lo_d = mg_low_D.get(key, {})
+    else:
+        key = key_jcp or path_label.replace(' ', '_').replace('→', '').replace('（', '').replace('）', '')
+        hi_d = mg_high_C.get(key, {})
+        lo_d = mg_low_C.get(key, {})
+
+    converged_hi = hi_d.get('converged', False)
+    converged_lo = lo_d.get('converged', False)
+    suffix = '' if (converged_hi and converged_lo) else '*'  # * = 未收斂
+
+    hi_b = (_fmt_est(hi_d.get('est'), 3) + suffix) if hi_d.get('est') is not None else P
+    lo_b = (_fmt_est(lo_d.get('est'), 3) + suffix) if lo_d.get('est') is not None else P
+    diff = (f"{hi_d['est']-lo_d['est']:+.3f}{suffix}"
+            if (hi_d.get('est') is not None and lo_d.get('est') is not None) else P)
+    return [path_label, hi_b, lo_b, diff, P, P, P, '需重跑約束模型' if not (converged_hi and converged_lo) else P]
+
+n_high_str = str(n_high) if n_high > 0 else '[待填]'
+n_low_str  = str(n_low)  if n_low  > 0 else '[待填]'
+
 mg_rows = [
-    # 路徑, 高PP估計值, 低PP估計值, 差值, Δχ², Δdf, p值（SB修正）, 顯著性
-    ['HP → DP',  P, P, P, P, P, P, P],
-    ['HP → CI',  P, P, P, P, P, P, P],
-    ['JCP → DP', P, P, P, P, P, P, P],
-    ['JCP → CI', P, P, P, P, P, P, P],
-    ['DP → CI',  P, P, P, P, P, P, P],
-    ['CI → DP',  P, P, P, P, P, P, P],
+    _mg_row('HP → DP',  key_hp='HP_DP'),
+    _mg_row('HP → CI',  key_hp='HP_CI'),
+    _mg_row('JCP → DP', key_jcp='JCP_DP'),
+    _mg_row('JCP → CI', key_jcp='JCP_CI'),
+    _mg_row('DP → CI',  key_hp='DP_CI',  key_jcp='DP_CI'),
+    _mg_row('CI → DP',  key_hp='CI_DP',  key_jcp='CI_DP'),
 ]
 df_mg = pd.DataFrame(mg_rows, columns=[
     '路徑',
-    '高PP組 β（n=[待填]）', '低PP組 β（n=[待填]）',
-    'β 差值', 'ΔSB-χ²', 'Δdf',
-    'p 值（SB 修正）', '調節效果'])
+    f'高PP組（n={n_high_str}）', f'低PP組（n={n_low_str}）',
+    '差值（高-低）', 'ΔSB-χ²', 'Δdf',
+    'p 值（SB 修正）', '備註'])
+
+# Add convergence note
+mg_note = pd.DataFrame([
+    ['注意', '多群組 configural 模型未收斂（自由度為負，參數過多）。',
+     '建議改跑分組RI-CLPM（High/Low PP 各別估計）或約束模型（cross-lagged paths constrained equal）。',
+     '', '', '', '', '']
+], columns=df_mg.columns)
 
 # ── 舊有分析表（保留）────────────────────────────────────────
 df_attrition_old = pd.DataFrame([
