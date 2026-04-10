@@ -311,32 +311,60 @@ P = '[待填]'   # placeholder
 C = '[待填]'   # CI placeholder
 
 hyp_rows = [
-    # 假設,  路徑說明,              路徑符號,       預測方向, b,  SE, p,  95%CI,          β,  支持與否
-    # ── 主軸交叉延遲 ──
-    ['H1a', 'HP → DP',   'WHP → WDP',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H1b', 'JCP → DP',  'WJCP → WDP',  '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H2a', 'HP → CI',   'WHP → WCI',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H2b', 'JCP → CI',  'WJCP → WCI',  '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H3',  'DP → CI',   'WDP → WCI',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    # 假設, 路徑說明, 路徑符號, 對應模型, 預測方向, b, SE, p, 95%CI, β, 支持與否
+    # ── 主軸交叉延遲（Model A: JCP, Model B: HP）──
+    ['H1a', 'HP → DP\n（職涯高原→決策拖延）',
+                         'WHP → WDP',   'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H1b', 'JCP → DP\n（職涯高原→決策拖延）',
+                         'WJCP → WDP',  'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H2a', 'HP → CI\n（職涯高原→職涯無所作為）',
+                         'WHP → WCI',   'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H2b', 'JCP → CI\n（職涯高原→職涯無所作為）',
+                         'WJCP → WCI',  'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H3',  'DP → CI\n（決策拖延→職涯無所作為）',
+                         'WDP → WCI',   'Model A/B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
     # ── 反向交叉延遲 ──
-    ['H4a', 'DP → HP',   'WDP → WHP',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H4b', 'DP → JCP',  'WDP → WJCP',  '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H5',  'CI → DP',   'WCI → WDP',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H6a', 'CI → HP',   'WCI → WHP',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H6b', 'CI → JCP',  'WCI → WJCP',  '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H4a', 'DP → HP\n（決策拖延→職涯高原）',
+                         'WDP → WHP',   'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H4b', 'DP → JCP\n（決策拖延→職涯高原）',
+                         'WDP → WJCP',  'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H5',  'CI → DP\n（職涯無所作為→決策拖延）',
+                         'WCI → WDP',   'Model A/B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H6a', 'CI → HP\n（職涯無所作為→職涯高原）',
+                         'WCI → WHP',   'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H6b', 'CI → JCP\n（職涯無所作為→職涯高原）',
+                         'WCI → WJCP',  'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
     # ── 中介 ──
     ['H7a', 'HP_T1 → DP_T2 → CI_T3\n（決策拖延中介）',
-                          'Indirect',    '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+                         'Indirect',    'Model B', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
     ['H7b', 'JCP_T1 → DP_T2 → CI_T3\n（決策拖延中介）',
-                          'Indirect',    '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
-    # ── 主動性人格 ──
-    ['H8a', 'PP → DP',   'WPP → WDP',   '負向（-）', P, P, P, f'[{P}, {P}]', P, P],
-    ['H8b', 'PP → CI',   'WPP → WCI',   '負向（-）', P, P, P, f'[{P}, {P}]', P, P],
+                         'Indirect',    'Model A', '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    # ── 主動型人格調節（多群組：高PP vs 低PP，Model C: JCP, Model D: HP）──
+    ['H8a', 'PP 調節 CP(HP)→DP、CP(HP)→CI\n（高PP路徑 < 低PP路徑）',
+                         'chi-sq diff test', 'Model D', '交互作用（調節）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H8b', 'PP 調節 CP(JCP)→DP、CP(JCP)→CI\n（高PP路徑 < 低PP路徑）',
+                         'chi-sq diff test', 'Model C', '交互作用（調節）', P, P, P, f'[{P}, {P}]', P, P],
 ]
 
 df_hyp = pd.DataFrame(hyp_rows, columns=[
-    '假設', '路徑', 'Mplus 路徑符號', '預測方向',
+    '假設', '路徑', 'Mplus 路徑符號', '對應模型', '預測方向',
     'b（非標準化）', 'SE', 'p 值', '95% CI', 'β（標準化）', '支持與否'])
+
+# ── CH4_多群組PP比較（H8：多群組 RI-CLPM，Satorra-Bentler χ² 差異檢定）──────
+mg_rows = [
+    # 路徑, 高PP估計值, 低PP估計值, 差值, Δχ², Δdf, p值（SB修正）, 顯著性
+    ['HP → DP',  P, P, P, P, P, P, P],
+    ['HP → CI',  P, P, P, P, P, P, P],
+    ['JCP → DP', P, P, P, P, P, P, P],
+    ['JCP → CI', P, P, P, P, P, P, P],
+    ['DP → CI',  P, P, P, P, P, P, P],
+    ['CI → DP',  P, P, P, P, P, P, P],
+]
+df_mg = pd.DataFrame(mg_rows, columns=[
+    '路徑',
+    '高PP組 β（n=[待填]）', '低PP組 β（n=[待填]）',
+    'β 差值', 'ΔSB-χ²', 'Δdf',
+    'p 值（SB 修正）', '調節效果'])
 
 # ── 舊有分析表（保留）────────────────────────────────────────
 df_attrition_old = pd.DataFrame([
@@ -362,6 +390,7 @@ with pd.ExcelWriter(EXCEL_OUT, engine='openpyxl') as writer:
     df_anova.to_excel(writer,         sheet_name='CH3_流失ANOVA',         index=False)
     df_chi2.to_excel(writer,          sheet_name='CH3_流失卡方',          index=False)
     df_hyp.to_excel(writer,           sheet_name='CH4_假設驗證結果',      index=False)
+    df_mg.to_excel(writer,            sheet_name='CH4_多群組PP比較',       index=False)
     df_attrition_old.to_excel(writer, sheet_name='樣本流失檢定_舊',      index=False)
 
 # ============================================================
@@ -389,6 +418,7 @@ LEFT_COLS = {
     'CH3_流失ANOVA':      [1, 2, 3, 4],
     'CH3_流失卡方':       [1],
     'CH4_假設驗證結果':   [1, 2, 4],
+    'CH4_多群組PP比較':   [1],
     '樣本流失檢定_舊':    [1],
 }
 

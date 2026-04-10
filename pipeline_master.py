@@ -1762,6 +1762,14 @@ def generate_mplus_dat(df, output_dir, ts):
                      ('Tenure','NowJobTenure'), ('Position','Position')]:
         mplus_df[col] = df[src] if src in df.columns else -999
 
+    # PP 中位數切割：PP_group = 0(低PP) / 1(高PP)，依 T1 PP 分數
+    pp_median = mplus_df['PP_T1'].replace(-999, np.nan).median()
+    mplus_df['PP_group'] = mplus_df['PP_T1'].apply(
+        lambda x: -999 if x == -999 else (1 if x >= pp_median else 0))
+    print(f"[PP分群] T1 PP 中位數 = {pp_median:.3f}  "
+          f"低PP組(0): {(mplus_df['PP_group']==0).sum()}人  "
+          f"高PP組(1): {(mplus_df['PP_group']==1).sum()}人")
+
     mplus_df = mplus_df.fillna(-999)
     dat_filename = f"Mplus_Data_{ts}.dat"
     dat_path = os.path.join(output_dir, dat_filename)
@@ -2139,67 +2147,35 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
         cfa_inp_list.append((label, utf8_path))
 
     # ---- RI-CLPM 模型 A-D ----
-    ri_models = {
-        'RI-CLPM-A (JCP→DP→CI)': {
-            'fname': f'RI_CLPM_A_JCP_DP_CI_{ts}',
-            'cp_var': 'JCP', 'with_pp': False,
-        },
-        'RI-CLPM-B (HP→DP→CI)': {
-            'fname': f'RI_CLPM_B_HP_DP_CI_{ts}',
-            'cp_var': 'HP', 'with_pp': False,
-        },
-        'RI-CLPM-C (JCP+PP→DP→CI)': {
-            'fname': f'RI_CLPM_C_JCP_PP_DP_CI_{ts}',
-            'cp_var': 'JCP', 'with_pp': True,
-        },
-        'RI-CLPM-D (HP+PP→DP→CI)': {
-            'fname': f'RI_CLPM_D_HP_PP_DP_CI_{ts}',
-            'cp_var': 'HP', 'with_pp': True,
-        },
-    }
-
+    # NAMES 欄位順序（含 PP_group）
     all_var_names = ('HP_T1  JCP_T1  PP_T1  DP_T1  CI_T1\n'
                      '    HP_T2  JCP_T2  PP_T2  DP_T2  CI_T2\n'
                      '    HP_T3  JCP_T3  PP_T3  DP_T3  CI_T3\n'
-                     '    Gender Tenure Position Age')
+                     '    Gender Tenure Position Age PP_group')
 
-    ri_inp_list = []
-    for label, cfg in ri_models.items():
-        cp  = cfg['cp_var']
+    def make_riclpm_ab(cp, ts, mplus_dat_filename):
+        """
+        Model A (JCP) / B (HP)：完整雙向六條交叉延遲路徑
+        H1: CP→DP  H2: CP→CI  H3: DP→CI
+        H4: DP→CP  H5: CI→DP  H6: CI→CP
+        """
         cpp = cp.lower()
-        wp  = cfg['with_pp']
-        use_vars = (f'{cp}_T1  {"PP_T1  " if wp else ""}DP_T1  CI_T1\n'
-                    f'    {cp}_T2  {"PP_T2  " if wp else ""}DP_T2  CI_T2\n'
-                    f'    {cp}_T3  {"PP_T3  " if wp else ""}DP_T3  CI_T3')
-
-        pp_indicators = (
-            f'\n  PP1 BY PP_T1@1;  PP_T1@0;  PP1@0;\n'
-            f'  PP2 BY PP_T2@1;  PP_T2@0;  PP2@0;\n'
-            f'  PP3 BY PP_T3@1;  PP_T3@0;  PP3@0;\n' if wp else ''
-        )
-        pp_ri = '  RI_PP BY PP1@1 PP2@1 PP3@1;\n' if wp else ''
-        pp_w  = ('  WPP1 BY PP1@1;  WPP2 BY PP2@1;  WPP3 BY PP3@1;\n' if wp else '')
-        pp_ar = ('  WPP2 ON WPP1 (ar_pp);  WPP3 ON WPP2 (ar_pp);\n' if wp else '')
-        pp_cov = (f'  W{cp}1 WITH WPP1;\n  WDP1  WITH WPP1;\n  WCI1  WITH WPP1;\n'
-                  f'  W{cp}2 WITH WPP2;\n  WDP2  WITH WPP2;\n  WCI2  WITH WPP2;\n'
-                  f'  W{cp}3 WITH WPP3;\n  WDP3  WITH WPP3;\n  WCI3  WITH WPP3;\n' if wp else '')
-        ri_cov_pp = (f'  RI_{cp} WITH RI_PP;\n  RI_DP  WITH RI_PP;\n  RI_CI  WITH RI_PP;\n' if wp else '')
-        pp_cl = ('  WDP2  ON WPP1 (cl_pp_dp);  WDP3  ON WPP2 (cl_pp_dp);\n'
-                 '  WCI2  ON WPP1 (cl_pp_ci);  WCI3  ON WPP2 (cl_pp_ci);\n' if wp else '')
-
-        content = (
-            f'TITLE:\n  {label}\n  Generated: {ts}\n\n'
+        use_vars = (f'{cp}_T1  DP_T1  CI_T1\n'
+                    f'    {cp}_T2  DP_T2  CI_T2\n'
+                    f'    {cp}_T3  DP_T3  CI_T3')
+        return (
+            f'TITLE:\n  RI-CLPM Model {"A" if cp=="JCP" else "B"} ({cp}->DP->CI, Bidirectional)\n'
+            f'  Generated: {ts}\n\n'
             f'DATA:\n  FILE = "{mplus_dat_filename}";\n\n'
             f'VARIABLE:\n  NAMES =\n    {all_var_names};\n'
             f'  USEVARIABLES =\n    {use_vars};\n'
             f'  MISSING = ALL(-999);\n\n'
             f'ANALYSIS:\n  ESTIMATOR = MLR;\n  ITERATIONS = 10000;\n  CONVERGENCE = 0.000001;\n\n'
             f'MODEL:\n'
-            f'  ! {cp} 單一指標\n'
+            f'  ! 單一指標\n'
             f'  {cp}1 BY {cp}_T1@1;  {cp}_T1@0;  {cp}1@0;\n'
             f'  {cp}2 BY {cp}_T2@1;  {cp}_T2@0;  {cp}2@0;\n'
             f'  {cp}3 BY {cp}_T3@1;  {cp}_T3@0;  {cp}3@0;\n'
-            f'{pp_indicators}'
             f'  DP1 BY DP_T1@1;  DP_T1@0;  DP1@0;\n'
             f'  DP2 BY DP_T2@1;  DP_T2@0;  DP2@0;\n'
             f'  DP3 BY DP_T3@1;  DP_T3@0;  DP3@0;\n'
@@ -2208,37 +2184,116 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
             f'  CI3 BY CI_T3@1;  CI_T3@0;  CI3@0;\n\n'
             f'  ! 隨機截距\n'
             f'  RI_{cp} BY {cp}1@1 {cp}2@1 {cp}3@1;\n'
-            f'{pp_ri}'
-            f'  RI_DP  BY DP1@1  DP2@1  DP3@1;\n'
-            f'  RI_CI  BY CI1@1  CI2@1  CI3@1;\n\n'
+            f'  RI_DP   BY DP1@1  DP2@1  DP3@1;\n'
+            f'  RI_CI   BY CI1@1  CI2@1  CI3@1;\n\n'
             f'  ! Within-person 殘差\n'
             f'  W{cp}1 BY {cp}1@1;  W{cp}2 BY {cp}2@1;  W{cp}3 BY {cp}3@1;\n'
-            f'{pp_w}'
-            f'  WDP1  BY DP1@1;   WDP2  BY DP2@1;   WDP3  BY DP3@1;\n'
-            f'  WCI1  BY CI1@1;   WCI2  BY CI2@1;   WCI3  BY CI3@1;\n\n'
+            f'  WDP1 BY DP1@1;  WDP2 BY DP2@1;  WDP3 BY DP3@1;\n'
+            f'  WCI1 BY CI1@1;  WCI2 BY CI2@1;  WCI3 BY CI3@1;\n\n'
             f'  ! 自回歸（跨波等同）\n'
             f'  W{cp}2 ON W{cp}1 (ar_{cpp});  W{cp}3 ON W{cp}2 (ar_{cpp});\n'
-            f'{pp_ar}'
-            f'  WDP2  ON WDP1  (ar_dp);   WDP3  ON WDP2  (ar_dp);\n'
-            f'  WCI2  ON WCI1  (ar_ci);   WCI3  ON WCI2  (ar_ci);\n\n'
+            f'  WDP2  ON WDP1  (ar_dp);       WDP3  ON WDP2  (ar_dp);\n'
+            f'  WCI2  ON WCI1  (ar_ci);       WCI3  ON WCI2  (ar_ci);\n\n'
             f'  ! T1 Within-person 共變\n'
-            f'  W{cp}1 WITH WDP1;\n  W{cp}1 WITH WCI1;\n  WDP1  WITH WCI1;\n'
-            f'{pp_cov}'
-            f'  ! T2 殘差共變\n'
-            f'  W{cp}2 WITH WDP2;\n  W{cp}2 WITH WCI2;\n  WDP2  WITH WCI2;\n'
-            f'  ! T3 殘差共變\n'
-            f'  W{cp}3 WITH WDP3;\n  W{cp}3 WITH WCI3;\n  WDP3  WITH WCI3;\n\n'
+            f'  W{cp}1 WITH WDP1;  W{cp}1 WITH WCI1;  WDP1 WITH WCI1;\n'
+            f'  ! T2/T3 殘差共變\n'
+            f'  W{cp}2 WITH WDP2;  W{cp}2 WITH WCI2;  WDP2 WITH WCI2;\n'
+            f'  W{cp}3 WITH WDP3;  W{cp}3 WITH WCI3;  WDP3 WITH WCI3;\n\n'
             f'  ! 隨機截距共變\n'
-            f'  RI_{cp} WITH RI_DP;\n  RI_{cp} WITH RI_CI;\n  RI_DP  WITH RI_CI;\n'
-            f'{ri_cov_pp}'
-            f'\n  ! 交叉延遲：{cp} -> DP\n'
-            f'  WDP2  ON W{cp}1 (cl_{cpp}_dp);  WDP3  ON W{cp}2 (cl_{cpp}_dp);\n'
-            f'  ! 交叉延遲：DP -> CI\n'
-            f'  WCI2  ON WDP1  (cl_dp_ci);   WCI3  ON WDP2  (cl_dp_ci);\n'
-            f'{pp_cl}'
+            f'  RI_{cp} WITH RI_DP;  RI_{cp} WITH RI_CI;  RI_DP WITH RI_CI;\n\n'
+            f'  ! ===== 六條雙向交叉延遲路徑 =====\n'
+            f'  ! H1a/b: {cp} -> DP（正向）\n'
+            f'  WDP2 ON W{cp}1 (cl_{cpp}_dp);  WDP3 ON W{cp}2 (cl_{cpp}_dp);\n'
+            f'  ! H2a/b: {cp} -> CI（正向）\n'
+            f'  WCI2 ON W{cp}1 (cl_{cpp}_ci);  WCI3 ON W{cp}2 (cl_{cpp}_ci);\n'
+            f'  ! H3: DP -> CI（正向）\n'
+            f'  WCI2 ON WDP1  (cl_dp_ci);      WCI3 ON WDP2  (cl_dp_ci);\n'
+            f'  ! H4a/b: DP -> {cp}（正向，反向）\n'
+            f'  W{cp}2 ON WDP1 (cl_dp_{cpp});  W{cp}3 ON WDP2 (cl_dp_{cpp});\n'
+            f'  ! H5: CI -> DP（正向，反向）\n'
+            f'  WDP2 ON WCI1  (cl_ci_dp);      WDP3 ON WCI2  (cl_ci_dp);\n'
+            f'  ! H6a/b: CI -> {cp}（正向，反向）\n'
+            f'  W{cp}2 ON WCI1 (cl_ci_{cpp});  W{cp}3 ON WCI2 (cl_ci_{cpp});\n'
             f'\nOUTPUT:\n  SAMPSTAT;  STDYX;  MODINDICES(10);  CINTERVAL;\n'
         )
-        utf8_path, b5_path = save_inp_dual_encoding(content, run_dir, cfg['fname'])
+
+    def make_riclpm_cd_multigroup(cp, ts, mplus_dat_filename):
+        """
+        Model C (JCP) / D (HP)：Multi-group RI-CLPM（高PP vs 低PP）
+        GROUPING = PP_group (0=LowPP 1=HighPP)
+        Configural model：各組路徑自由估計，比較組間差異
+        """
+        cpp = cp.lower()
+        label = 'C' if cp == 'JCP' else 'D'
+        use_vars = (f'{cp}_T1  DP_T1  CI_T1\n'
+                    f'    {cp}_T2  DP_T2  CI_T2\n'
+                    f'    {cp}_T3  DP_T3  CI_T3')
+        return (
+            f'TITLE:\n  RI-CLPM Model {label} Multi-group PP ({cp}, H8 test)\n'
+            f'  Generated: {ts}\n\n'
+            f'DATA:\n  FILE = "{mplus_dat_filename}";\n\n'
+            f'VARIABLE:\n  NAMES =\n    {all_var_names};\n'
+            f'  USEVARIABLES =\n    {use_vars};\n'
+            f'  GROUPING = PP_group (0=LowPP 1=HighPP);\n'
+            f'  MISSING = ALL(-999);\n\n'
+            f'ANALYSIS:\n  ESTIMATOR = MLR;\n  ITERATIONS = 10000;\n  CONVERGENCE = 0.000001;\n\n'
+            f'MODEL:\n'
+            f'  ! 單一指標（兩組共用定義）\n'
+            f'  {cp}1 BY {cp}_T1@1;  {cp}_T1@0;  {cp}1@0;\n'
+            f'  {cp}2 BY {cp}_T2@1;  {cp}_T2@0;  {cp}2@0;\n'
+            f'  {cp}3 BY {cp}_T3@1;  {cp}_T3@0;  {cp}3@0;\n'
+            f'  DP1 BY DP_T1@1;  DP_T1@0;  DP1@0;\n'
+            f'  DP2 BY DP_T2@1;  DP_T2@0;  DP2@0;\n'
+            f'  DP3 BY DP_T3@1;  DP_T3@0;  DP3@0;\n'
+            f'  CI1 BY CI_T1@1;  CI_T1@0;  CI1@0;\n'
+            f'  CI2 BY CI_T2@1;  CI_T2@0;  CI2@0;\n'
+            f'  CI3 BY CI_T3@1;  CI_T3@0;  CI3@0;\n\n'
+            f'  ! 隨機截距\n'
+            f'  RI_{cp} BY {cp}1@1 {cp}2@1 {cp}3@1;\n'
+            f'  RI_DP   BY DP1@1  DP2@1  DP3@1;\n'
+            f'  RI_CI   BY CI1@1  CI2@1  CI3@1;\n\n'
+            f'  ! Within-person 殘差\n'
+            f'  W{cp}1 BY {cp}1@1;  W{cp}2 BY {cp}2@1;  W{cp}3 BY {cp}3@1;\n'
+            f'  WDP1 BY DP1@1;  WDP2 BY DP2@1;  WDP3 BY DP3@1;\n'
+            f'  WCI1 BY CI1@1;  WCI2 BY CI2@1;  WCI3 BY CI3@1;\n\n'
+            f'  ! 自回歸（跨波等同）\n'
+            f'  W{cp}2 ON W{cp}1 (ar_{cpp});  W{cp}3 ON W{cp}2 (ar_{cpp});\n'
+            f'  WDP2  ON WDP1  (ar_dp);       WDP3  ON WDP2  (ar_dp);\n'
+            f'  WCI2  ON WCI1  (ar_ci);       WCI3  ON WCI2  (ar_ci);\n\n'
+            f'  ! T1/T2/T3 Within-person 共變\n'
+            f'  W{cp}1 WITH WDP1;  W{cp}1 WITH WCI1;  WDP1 WITH WCI1;\n'
+            f'  W{cp}2 WITH WDP2;  W{cp}2 WITH WCI2;  WDP2 WITH WCI2;\n'
+            f'  W{cp}3 WITH WDP3;  W{cp}3 WITH WCI3;  WDP3 WITH WCI3;\n\n'
+            f'  ! 隨機截距共變\n'
+            f'  RI_{cp} WITH RI_DP;  RI_{cp} WITH RI_CI;  RI_DP WITH RI_CI;\n\n'
+            f'  ! 六條交叉延遲（configural：兩組各自自由估計）\n'
+            f'  WDP2 ON W{cp}1;  WDP3 ON W{cp}2;\n'
+            f'  WCI2 ON W{cp}1;  WCI3 ON W{cp}2;\n'
+            f'  WCI2 ON WDP1;   WCI3 ON WDP2;\n'
+            f'  W{cp}2 ON WDP1; W{cp}3 ON WDP2;\n'
+            f'  WDP2 ON WCI1;   WDP3 ON WCI2;\n'
+            f'  W{cp}2 ON WCI1; W{cp}3 ON WCI2;\n'
+            f'\n! ------- 約束模型（另存 _Constrained 版本做 chi-square diff test）-------\n'
+            f'! 若要測試 H8，另跑一個模型將上面六條路徑標上等同標籤：\n'
+            f'!   WDP2 ON W{cp}1 (cl_{cpp}_dp);  WDP3 ON W{cp}2 (cl_{cpp}_dp); 等\n'
+            f'! 再做 chi-square difference test（MLR 用 Satorra-Bentler correction）\n'
+            f'\nOUTPUT:\n  SAMPSTAT;  STDYX;  MODINDICES(10);  CINTERVAL;\n'
+        )
+
+    ri_models_spec = [
+        (f'RI-CLPM-A (JCP, Bidirectional)',   f'RI_CLPM_A_JCP_Bidir_{ts}',    'JCP', 'AB'),
+        (f'RI-CLPM-B (HP, Bidirectional)',    f'RI_CLPM_B_HP_Bidir_{ts}',     'HP',  'AB'),
+        (f'RI-CLPM-C (JCP, MultiGroup-PP)',   f'RI_CLPM_C_JCP_MultiGrp_{ts}', 'JCP', 'CD'),
+        (f'RI-CLPM-D (HP, MultiGroup-PP)',    f'RI_CLPM_D_HP_MultiGrp_{ts}',  'HP',  'CD'),
+    ]
+
+    ri_inp_list = []
+    for label, fname, cp, mtype in ri_models_spec:
+        if mtype == 'AB':
+            content = make_riclpm_ab(cp, ts, mplus_dat_filename)
+        else:
+            content = make_riclpm_cd_multigroup(cp, ts, mplus_dat_filename)
+        utf8_path, _ = save_inp_dual_encoding(content, run_dir, fname)
         ri_inp_list.append((label, utf8_path))
 
     # ---- 自動執行 Mplus ----
@@ -2254,38 +2309,59 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
             all_results[label] = {'fit': parse_mplus_fit(out_path), 'out': out_path}
 
     # ---- 解析 RI-CLPM 結果 ----
+    # Model A/B: 雙向六路徑（H1a/b~H6a/b）；Model C/D: 多群組（configural，各組自由估計）
     ri_path_maps = {
-        'RI-CLPM-A (JCP→DP→CI)': {
-            'JCP→DP': ('WDP2', 'WJCP1'), 'DP→CI': ('WCI2', 'WDP1')},
-        'RI-CLPM-B (HP→DP→CI)': {
-            'HP→DP':  ('WDP2', 'WHP1'),  'DP→CI': ('WCI2', 'WDP1')},
-        'RI-CLPM-C (JCP+PP→DP→CI)': {
-            'JCP→DP': ('WDP2', 'WJCP1'), 'DP→CI': ('WCI2', 'WDP1'),
-            'PP→DP':  ('WDP2', 'WPP1'),  'PP→CI': ('WCI2', 'WPP1')},
-        'RI-CLPM-D (HP+PP→DP→CI)': {
-            'HP→DP':  ('WDP2', 'WHP1'),  'DP→CI': ('WCI2', 'WDP1'),
-            'PP→DP':  ('WDP2', 'WPP1'),  'PP→CI': ('WCI2', 'WPP1')},
+        'RI-CLPM-A (JCP, Bidirectional)': {
+            'H1a: JCP→DP': ('WDP2', 'WJCP1'),
+            'H2a: JCP→CI': ('WCI2', 'WJCP1'),
+            'H3:  DP→CI':  ('WCI2', 'WDP1'),
+            'H4a: DP→JCP': ('WJCP2', 'WDP1'),
+            'H5:  CI→DP':  ('WDP2', 'WCI1'),
+            'H6a: CI→JCP': ('WJCP2', 'WCI1'),
+        },
+        'RI-CLPM-B (HP, Bidirectional)': {
+            'H1b: HP→DP':  ('WDP2', 'WHP1'),
+            'H2b: HP→CI':  ('WCI2', 'WHP1'),
+            'H3:  DP→CI':  ('WCI2', 'WDP1'),
+            'H4b: DP→HP':  ('WHP2', 'WDP1'),
+            'H5:  CI→DP':  ('WDP2', 'WCI1'),
+            'H6b: CI→HP':  ('WHP2', 'WCI1'),
+        },
+        # Models C/D are multi-group (configural); paths parsed per group via group-specific output
+        # Cross-lagged labels match the configural (unconstrained) group sections
+        'RI-CLPM-C (JCP, MultiGroup-PP)': {
+            'H1a: JCP→DP [configural]': ('WDP2', 'WJCP1'),
+            'H2a: JCP→CI [configural]': ('WCI2', 'WJCP1'),
+            'H3:  DP→CI  [configural]': ('WCI2', 'WDP1'),
+            'H4a: DP→JCP [configural]': ('WJCP2', 'WDP1'),
+            'H5:  CI→DP  [configural]': ('WDP2', 'WCI1'),
+            'H6a: CI→JCP [configural]': ('WJCP2', 'WCI1'),
+        },
+        'RI-CLPM-D (HP, MultiGroup-PP)': {
+            'H1b: HP→DP  [configural]': ('WDP2', 'WHP1'),
+            'H2b: HP→CI  [configural]': ('WCI2', 'WHP1'),
+            'H3:  DP→CI  [configural]': ('WCI2', 'WDP1'),
+            'H4b: DP→HP  [configural]': ('WHP2', 'WDP1'),
+            'H5:  CI→DP  [configural]': ('WDP2', 'WCI1'),
+            'H6b: CI→HP  [configural]': ('WHP2', 'WCI1'),
+        },
     }
     ri_corr_maps = {
-        'RI-CLPM-A (JCP→DP→CI)': [
+        'RI-CLPM-A (JCP, Bidirectional)': [
             ('RI_JCP↔RI_DP', 'RI_JCP', 'RI_DP'),
             ('RI_JCP↔RI_CI', 'RI_JCP', 'RI_CI'),
             ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')],
-        'RI-CLPM-B (HP→DP→CI)': [
+        'RI-CLPM-B (HP, Bidirectional)': [
             ('RI_HP↔RI_DP',  'RI_HP',  'RI_DP'),
             ('RI_HP↔RI_CI',  'RI_HP',  'RI_CI'),
             ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')],
-        'RI-CLPM-C (JCP+PP→DP→CI)': [
-            ('RI_JCP↔RI_PP', 'RI_JCP', 'RI_PP'),
+        'RI-CLPM-C (JCP, MultiGroup-PP)': [
             ('RI_JCP↔RI_DP', 'RI_JCP', 'RI_DP'),
-            ('RI_PP↔RI_DP',  'RI_PP',  'RI_DP'),
-            ('RI_PP↔RI_CI',  'RI_PP',  'RI_CI'),
+            ('RI_JCP↔RI_CI', 'RI_JCP', 'RI_CI'),
             ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')],
-        'RI-CLPM-D (HP+PP→DP→CI)': [
-            ('RI_HP↔RI_PP',  'RI_HP',  'RI_PP'),
+        'RI-CLPM-D (HP, MultiGroup-PP)': [
             ('RI_HP↔RI_DP',  'RI_HP',  'RI_DP'),
-            ('RI_PP↔RI_DP',  'RI_PP',  'RI_DP'),
-            ('RI_PP↔RI_CI',  'RI_PP',  'RI_CI'),
+            ('RI_HP↔RI_CI',  'RI_HP',  'RI_CI'),
             ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')],
     }
 
