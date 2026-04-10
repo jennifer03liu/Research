@@ -306,6 +306,38 @@ if 'Education' in df_all.columns:
 
 df_chi2 = pd.DataFrame(chi2_rows, columns=["變數", "χ²", "df", "p 值", "顯著性"])
 
+# ── CH4_假設驗證結果表（Mplus 跑完後填入）───────────────────
+P = '[待填]'   # placeholder
+C = '[待填]'   # CI placeholder
+
+hyp_rows = [
+    # 假設,  路徑說明,              路徑符號,       預測方向, b,  SE, p,  95%CI,          β,  支持與否
+    # ── 主軸交叉延遲 ──
+    ['H1a', 'HP → DP',   'WHP → WDP',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H1b', 'JCP → DP',  'WJCP → WDP',  '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H2a', 'HP → CI',   'WHP → WCI',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H2b', 'JCP → CI',  'WJCP → WCI',  '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H3',  'DP → CI',   'WDP → WCI',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    # ── 反向交叉延遲 ──
+    ['H4a', 'DP → HP',   'WDP → WHP',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H4b', 'DP → JCP',  'WDP → WJCP',  '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H5',  'CI → DP',   'WCI → WDP',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H6a', 'CI → HP',   'WCI → WHP',   '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H6b', 'CI → JCP',  'WCI → WJCP',  '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    # ── 中介 ──
+    ['H7a', 'HP_T1 → DP_T2 → CI_T3\n（決策拖延中介）',
+                          'Indirect',    '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H7b', 'JCP_T1 → DP_T2 → CI_T3\n（決策拖延中介）',
+                          'Indirect',    '正向（+）', P, P, P, f'[{P}, {P}]', P, P],
+    # ── 主動性人格 ──
+    ['H8a', 'PP → DP',   'WPP → WDP',   '負向（-）', P, P, P, f'[{P}, {P}]', P, P],
+    ['H8b', 'PP → CI',   'WPP → WCI',   '負向（-）', P, P, P, f'[{P}, {P}]', P, P],
+]
+
+df_hyp = pd.DataFrame(hyp_rows, columns=[
+    '假設', '路徑', 'Mplus 路徑符號', '預測方向',
+    'b（非標準化）', 'SE', 'p 值', '95% CI', 'β（標準化）', '支持與否'])
+
 # ── 舊有分析表（保留）────────────────────────────────────────
 df_attrition_old = pd.DataFrame([
     ["整體職涯停滯 (CP)", "p = .355", "無顯著差異"],
@@ -329,6 +361,7 @@ with pd.ExcelWriter(EXCEL_OUT, engine='openpyxl') as writer:
     df_cfa.to_excel(writer,           sheet_name='CH3_CFA適配指標',      index=False)
     df_anova.to_excel(writer,         sheet_name='CH3_流失ANOVA',         index=False)
     df_chi2.to_excel(writer,          sheet_name='CH3_流失卡方',          index=False)
+    df_hyp.to_excel(writer,           sheet_name='CH4_假設驗證結果',      index=False)
     df_attrition_old.to_excel(writer, sheet_name='樣本流失檢定_舊',      index=False)
 
 # ============================================================
@@ -355,6 +388,7 @@ LEFT_COLS = {
     'CH3_CFA適配指標':    [1, 7],
     'CH3_流失ANOVA':      [1, 2, 3, 4],
     'CH3_流失卡方':       [1],
+    'CH4_假設驗證結果':   [1, 2, 4],
     '樣本流失檢定_舊':    [1],
 }
 
