@@ -2386,6 +2386,8 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
       Sheet 5: RI-CLPM 適配指數（4 個模型）
       Sheet 6: RI-CLPM Within-person 路徑係數（STDYX）
       Sheet 7: RI-CLPM Between-person 隨機截距相關
+      Sheet 8: Mplus 語法（所有 .inp 檔內容）
+      Sheet 9: 各量表題目 Item-level 描述統計
     """
     try:
         import openpyxl
@@ -2647,7 +2649,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
                         ('F', 7), ('G', 7), ('H', 9), ('I', 14), ('J', 7), ('K', 6)])
 
     ws4 = wb.create_sheet("4_CFA適配")
-    write_fit_sheet(ws4, "CFA 驗證性因素分析適配指數（T1, N = 277）", {
+    write_fit_sheet(ws4, f"CFA 驗證性因素分析適配指數（T1, N = {n_total}）", {
         'CFA-A (JCP+DP+CI)':     'JCP + DP + CI（3因子）',
         'CFA-B (HP+DP+CI)':      'HP + DP + CI（3因子）',
         'CFA-C (JCP+PP+DP+CI)':  'JCP + PP + DP + CI（4因子）',
@@ -2655,11 +2657,11 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     })
 
     ws5 = wb.create_sheet("5_RICLPM適配")
-    write_fit_sheet(ws5, "RI-CLPM 適配指數（parcel 合成分數，N = 277）", {
-        'RI-CLPM-A (JCP→DP→CI)':    'JCP → DP → CI',
-        'RI-CLPM-B (HP→DP→CI)':     'HP → DP → CI',
-        'RI-CLPM-C (JCP+PP→DP→CI)': 'JCP + PP → DP → CI',
-        'RI-CLPM-D (HP+PP→DP→CI)':  'HP + PP → DP → CI',
+    write_fit_sheet(ws5, f"RI-CLPM 適配指數（parcel 合成分數，N = {n_total}）", {
+        'RI-CLPM-A (JCP, Bidirectional)':  'JCP 雙向六路徑（H1b~H6b）',
+        'RI-CLPM-B (HP, Bidirectional)':   'HP 雙向六路徑（H1a~H6a）',
+        'RI-CLPM-C (JCP, MultiGroup-PP)':  'JCP 多群組（高/低PP，H8b）',
+        'RI-CLPM-D (HP, MultiGroup-PP)':   'HP 多群組（高/低PP，H8a）',
     })
 
     # ── Sheet 6: RI-CLPM Within-person 路徑係數 ──────────────────
@@ -2672,10 +2674,10 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     r += 1
 
     ri_model_order = [
-        'RI-CLPM-A (JCP→DP→CI)',
-        'RI-CLPM-B (HP→DP→CI)',
-        'RI-CLPM-C (JCP+PP→DP→CI)',
-        'RI-CLPM-D (HP+PP→DP→CI)',
+        'RI-CLPM-A (JCP, Bidirectional)',
+        'RI-CLPM-B (HP, Bidirectional)',
+        'RI-CLPM-C (JCP, MultiGroup-PP)',
+        'RI-CLPM-D (HP, MultiGroup-PP)',
     ]
     for mkey in ri_model_order:
         paths = all_results.get(mkey, {}).get('paths', {})
@@ -2754,6 +2756,107 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
              ).font = Font(italic=True, size=9)
     ws7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
     set_widths(ws7, [('A', 28), ('B', 18), ('C', 10), ('D', 12), ('E', 12), ('F', 14)])
+
+    # ── Sheet 8: Mplus 語法（.inp 內容）─────────────────────────
+    ws8 = wb.create_sheet("8_Mplus語法")
+    ws8.cell(row=1, column=1,
+             value="Mplus 分析語法（.inp）— 可直接複製至 Mplus 執行"
+             ).font = Font(bold=True, size=12)
+    ws8.merge_cells(start_row=1, start_column=1, end_row=1, end_column=3)
+    hdr(ws8, 2, 1, "模型")
+    hdr(ws8, 2, 2, "檔案名稱")
+    hdr(ws8, 2, 3, "語法內容")
+    ws8.column_dimensions['A'].width = 28
+    ws8.column_dimensions['B'].width = 40
+    ws8.column_dimensions['C'].width = 80
+
+    # 掃 run_dir 下所有 .inp（排除 _b5 備用版）
+    all_inp_paths = []
+    for fname in sorted(os.listdir(run_dir)):
+        if fname.endswith('.inp') and not fname.endswith('_b5.inp'):
+            lbl = fname.replace(f'_{ts}.inp', '').replace('_', ' ').replace('-', ' ')
+            all_inp_paths.append((lbl, os.path.join(run_dir, fname)))
+
+    r8 = 3
+    for label, inp_path in all_inp_paths:
+        if not os.path.isfile(inp_path):
+            continue
+        try:
+            with open(inp_path, 'r', encoding='utf-8', errors='replace') as fh:
+                syntax = fh.read()
+        except Exception:
+            syntax = '（讀取失敗）'
+        fname = os.path.basename(inp_path)
+        c1 = ws8.cell(row=r8, column=1, value=label)
+        c1.font = Font(bold=True, size=10)
+        c1.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        c1.border = bdr
+        c2 = ws8.cell(row=r8, column=2, value=fname)
+        c2.font = Font(size=9)
+        c2.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        c2.border = bdr
+        c3 = ws8.cell(row=r8, column=3, value=syntax)
+        c3.font = Font(name='Courier New', size=9)
+        c3.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        c3.border = bdr
+        ws8.row_dimensions[r8].height = max(80, syntax.count('\n') * 12)
+        r8 += 1
+
+    # ── Sheet 9: 各量表題目 item-level 描述統計 ─────────────────
+    ws9 = wb.create_sheet("9_量表題目統計")
+    ws9.cell(row=1, column=1,
+             value=f"各量表 Item-level 描述統計（三波完整樣本，N = {n_total}）"
+             ).font = Font(bold=True, size=12)
+    ws9.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
+
+    hdr_cols = ["量表", "波次", "題號", "題幹（變數名）",
+                "M", "SD", "最小值", "最大值"]
+    for ci, h in enumerate(hdr_cols, 1):
+        hdr(ws9, 2, ci, h)
+
+    # 量表定義：(中文名稱, 英文代碼, 題數)
+    scale_defs = [
+        ('階層停滯 HP',     'HP',  6),
+        ('工作內容停滯 JCP','JCP', 6),
+        ('主動型人格 PP',   'PP',  6),
+        ('決策拖延 DP',     'DP',  5),
+        ('職涯無所作為 CI', 'CI',  8),
+    ]
+    waves = ['T1', 'T2', 'T3']
+
+    r9 = 3
+    for scale_zh, scale_code, n_items in scale_defs:
+        for wave in waves:
+            for i in range(1, n_items + 1):
+                col_name = f"{scale_code}{i}_{wave}"
+                if col_name not in df.columns:
+                    continue
+                s = df[col_name].dropna()
+                c1 = ws9.cell(row=r9, column=1, value=scale_zh)
+                c1.font = Font(size=10, bold=(i == 1 and wave == 'T1'))
+                c1.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+                c1.border = bdr
+                for ci, val in enumerate([
+                    scale_zh, wave, f'{scale_code}{i}', col_name,
+                    round(float(s.mean()), 3) if len(s) > 0 else 'N/A',
+                    round(float(s.std()),  3) if len(s) > 0 else 'N/A',
+                    round(float(s.min()),  1) if len(s) > 0 else 'N/A',
+                    round(float(s.max()),  1) if len(s) > 0 else 'N/A',
+                ], 1):
+                    c = ws9.cell(row=r9, column=ci, value=val)
+                    c.font = Font(size=10)
+                    c.alignment = Alignment(
+                        horizontal='left' if ci <= 4 else 'center',
+                        vertical='center')
+                    c.border = bdr
+                r9 += 1
+            # blank separator between waves
+            r9 += 1
+        r9 += 1  # blank separator between scales
+
+    set_widths(ws9, [('A', 22), ('B', 6), ('C', 8), ('D', 18),
+                     ('E', 8), ('F', 8), ('G', 8), ('H', 8)])
+    ws9.freeze_panes = ws9['A3']
 
     # ── 儲存 ─────────────────────────────────────────────────────
     excel_path = os.path.join(run_dir, f"Thesis_Results_{ts}.xlsx")

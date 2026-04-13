@@ -3,6 +3,13 @@
 *.sav
 *.xlsx
 
+# Pipeline output (auto-generated, not versioned)
+Master_Pipeline_Output/
+Pipeline_Output/
+Pipeline_Log_temp.txt
+temp_output.txt
+thesis_analysis_draft_*.md
+
 # Python
 __pycache__/
 *.py[cod]
