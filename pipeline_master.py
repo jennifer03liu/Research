@@ -2751,9 +2751,9 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
       Sheet 6: RI-CLPM Within-person 路徑係數（STDYX）
       Sheet 7: RI-CLPM Between-person 隨機截距相關
       Sheet 8: H7 中介間接效果（MODEL INDIRECT，JCP/HP→DP→CI）
-      Sheet 9: Mplus 語法（所有 .inp 檔內容）
-      Sheet 10: 各量表題目 Item-level 描述統計 + 刪題建議
-      Sheet 9: 各量表題目 Item-level 描述統計
+      Sheet 9:  Mplus 語法（所有 .inp 檔內容）
+      Sheet 10: SPSS 語法（SPSS_Syntax + SPSS_Analysis .sps 內容）
+      Sheet 11: 各量表題目 Item-level 描述統計 + 刪題建議
     """
     try:
         import openpyxl
@@ -3259,8 +3259,52 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         var_total = data.sum(axis=1).var(ddof=1)
         return round((k / (k - 1)) * (1 - var_sum / var_total), 3) if var_total > 0 else np.nan
 
-    # ── Sheet 10: 各量表題目 item-level 描述統計 + 刪題建議 ────────
-    ws9 = wb.create_sheet("10_量表題目統計")
+    # ── Sheet 10: SPSS 語法（.sps 內容）────────────────────────────
+    ws_spss = wb.create_sheet("10_SPSS語法")
+    ws_spss.cell(row=1, column=1,
+                 value="SPSS 分析語法（.sps）— 可直接複製至 SPSS 語法視窗執行"
+                 ).font = Font(bold=True, size=12)
+    ws_spss.merge_cells(start_row=1, start_column=1, end_row=1, end_column=3)
+    hdr(ws_spss, 2, 1, "用途說明")
+    hdr(ws_spss, 2, 2, "檔案名稱")
+    hdr(ws_spss, 2, 3, "語法內容")
+    ws_spss.column_dimensions['A'].width = 30
+    ws_spss.column_dimensions['B'].width = 44
+    ws_spss.column_dimensions['C'].width = 80
+
+    # 依執行順序列出所有 .sps 檔
+    spss_file_specs = [
+        (f"SPSS_Syntax_{ts}.sps",   "步驟1：匯入資料 + 變數標籤（先執行）"),
+        (f"SPSS_Analysis_{ts}.sps", "步驟2：完整分析（描述統計/相關/CMV/CITC/t檢定）"),
+        (f"SPSS_Reliability_{ts}.sps", "步驟2b：信度分析（舊版，已整合於 Analysis）"),
+    ]
+    r_spss = 3
+    for sps_fname, sps_label in spss_file_specs:
+        sps_path = os.path.join(run_dir, sps_fname)
+        if not os.path.isfile(sps_path):
+            continue
+        try:
+            with open(sps_path, 'r', encoding='utf-8-sig', errors='replace') as fh:
+                sps_syntax = fh.read()
+        except Exception:
+            sps_syntax = '（讀取失敗）'
+        c1 = ws_spss.cell(row=r_spss, column=1, value=sps_label)
+        c1.font = Font(bold=True, size=10)
+        c1.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        c1.border = bdr
+        c2 = ws_spss.cell(row=r_spss, column=2, value=sps_fname)
+        c2.font = Font(size=9)
+        c2.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        c2.border = bdr
+        c3 = ws_spss.cell(row=r_spss, column=3, value=sps_syntax)
+        c3.font = Font(name='Courier New', size=9)
+        c3.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        c3.border = bdr
+        ws_spss.row_dimensions[r_spss].height = max(80, sps_syntax.count('\n') * 12)
+        r_spss += 1
+
+    # ── Sheet 11: 各量表題目 item-level 描述統計 + 刪題建議 ────────
+    ws9 = wb.create_sheet("11_量表題目統計")
     ws9.cell(row=1, column=1,
              value=f"各量表 Item-level 描述統計 + 刪題建議（三波完整樣本，N = {n_total}）"
              ).font = Font(bold=True, size=12)
