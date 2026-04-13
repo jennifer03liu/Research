@@ -2059,6 +2059,101 @@ def parse_mplus_ri_corr(out_path, ri_pairs):
     return results
 
 
+def parse_mplus_indirect(out_path, indirect_specs):
+    """
+    從 Mplus .out 解析 MODEL INDIRECT 間接效果（STDYX 標準化）。
+
+    Mplus 7.4 輸出格式：
+      STANDARDIZED TOTAL...INDIRECT...
+      STDYX Standardization
+        ...
+        Effects from X to Y
+          Indirect    Estimate  SE  Est./S.E.  P-Value
+      CONFIDENCE INTERVALS OF STANDARDIZED TOTAL...
+      STDYX Standardization
+        ...
+        Effects from X to Y
+          Indirect    Lo.5%  Lo2.5%  Lo5%  Est  Hi5%  Hi2.5%  Hi.5%
+
+    indirect_specs: list of (label, x_var, m_var, y_var)
+      m_var 在此格式中不出現在獨立行，只要 x_var 和 y_var 對即可。
+      例: [('H7a: JCP→DP→CI', 'WJCP1', 'WDP2', 'WCI3'), ...]
+
+    回傳: { label: {'est': float, 'se': float, 'z': float, 'p': float,
+                    'ci_lo': float, 'ci_hi': float, 'sig': bool} }
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return {}
+    try:
+        with open(out_path, 'r', encoding='utf-8', errors='replace') as f:
+            text = f.read()
+    except Exception:
+        return {}
+
+    results = {}
+
+    # ── 1. STDYX 標準化間接效果（Estimate SE z p）──
+    std_m = re.search(
+        r'STANDARDIZED TOTAL.*?INDIRECT.*?STDYX Standardization\s+(.*?)'
+        r'(?=CONFIDENCE INTERVALS|\nTECHNICAL|\Z)',
+        text, re.DOTALL | re.IGNORECASE
+    )
+    std_text = std_m.group(1) if std_m else ''
+
+    # ── 2. STDYX CI (7 欄: lo.5% lo2.5% lo5% est hi5% hi2.5% hi.5%) ──
+    ci_m = re.search(
+        r'CONFIDENCE INTERVALS OF STANDARDIZED TOTAL.*?INDIRECT.*?STDYX Standardization\s+(.*?)'
+        r'(?=\nTECHNICAL|\Z)',
+        text, re.DOTALL | re.IGNORECASE
+    )
+    ci_text = ci_m.group(1) if ci_m else ''
+
+    for label, x_var, m_var, y_var in indirect_specs:
+        # 在 STDYX 區段找 "Effects from X to Y" 並取其下的 "Indirect" 行
+        eff_m = re.search(
+            rf'Effects from\s+{re.escape(x_var)}\s+to\s+{re.escape(y_var)}\s+(.*?)'
+            rf'(?=Effects from|\Z)',
+            std_text, re.DOTALL | re.IGNORECASE
+        )
+        if not eff_m:
+            continue
+
+        # "  Indirect    est  se  z  p" 行
+        row = re.search(
+            r'^\s*Indirect\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)',
+            eff_m.group(1), re.MULTILINE | re.IGNORECASE
+        )
+        if not row:
+            continue
+        est = float(row.group(1))
+        se  = float(row.group(2))
+        z   = float(row.group(3))
+        p   = float(row.group(4))
+
+        # CI 區段
+        ci_lo, ci_hi = np.nan, np.nan
+        ci_eff = re.search(
+            rf'Effects from\s+{re.escape(x_var)}\s+to\s+{re.escape(y_var)}\s+(.*?)'
+            rf'(?=Effects from|\Z)',
+            ci_text, re.DOTALL | re.IGNORECASE
+        )
+        if ci_eff:
+            ci_row = re.search(
+                r'^\s*Indirect\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)'
+                r'\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)',
+                ci_eff.group(1), re.MULTILINE | re.IGNORECASE
+            )
+            if ci_row:
+                ci_lo = float(ci_row.group(2))   # Lower 2.5%
+                ci_hi = float(ci_row.group(6))   # Upper 2.5%
+
+        sig = (not (np.isnan(ci_lo) or np.isnan(ci_hi)) and not (ci_lo <= 0 <= ci_hi)) \
+              if not (np.isnan(ci_lo) or np.isnan(ci_hi)) else (p < .05)
+        results[label] = {'est': est, 'se': se, 'z': z, 'p': p,
+                          'ci_lo': ci_lo, 'ci_hi': ci_hi, 'sig': sig}
+    return results
+
+
 # ==========================================
 # MODULE E: 整合執行所有 Mplus 模型並收集結果
 # ==========================================
@@ -2208,31 +2303,36 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
             f'  WDP2 ON WCI1  (cl_ci_dp);      WDP3 ON WCI2  (cl_ci_dp);\n'
             f'  ! H6a/b: CI -> {cp}（正向，反向）\n'
             f'  W{cp}2 ON WCI1 (cl_ci_{cpp});  W{cp}3 ON WCI2 (cl_ci_{cpp});\n'
+            f'\nMODEL INDIRECT:\n'
+            f'  ! H7: {cp}(T1)→DP(T2)→CI(T3) 間接效果（DP 中介）\n'
+            f'  WCI3 IND WDP2 W{cpp.upper()}1;\n'
             f'\nOUTPUT:\n  SAMPSTAT;  STDYX;  MODINDICES(10);  CINTERVAL;\n'
         )
 
-    def make_riclpm_cd_multigroup(cp, ts, mplus_dat_filename):
+    def make_riclpm_separate_group(cp, ts, mplus_dat_filename, pp_val, group_label):
         """
-        Model C (JCP) / D (HP)：Multi-group RI-CLPM（高PP vs 低PP）
-        GROUPING = PP_group (0=LowPP 1=HighPP)
-        Configural model：各組路徑自由估計，比較組間差異
+        Model C/D subgroup：單一群組 RI-CLPM（High PP 或 Low PP），使用 USEOBSERVATIONS
+        pp_val=1 → HighPP；pp_val=0 → LowPP
+        Configural 多群組無法識別（df<0）→ 改為各組分別跑，比較路徑係數以測試 H8
         """
         cpp = cp.lower()
-        label = 'C' if cp == 'JCP' else 'D'
+        model_letter = 'C' if cp == 'JCP' else 'D'
+        grp_short = 'Hi' if pp_val == 1 else 'Lo'
         use_vars = (f'{cp}_T1  DP_T1  CI_T1\n'
                     f'    {cp}_T2  DP_T2  CI_T2\n'
                     f'    {cp}_T3  DP_T3  CI_T3')
         return (
-            f'TITLE:\n  RI-CLPM Model {label} Multi-group PP ({cp}, H8 test)\n'
+            f'TITLE:\n  RI-CLPM Model {model_letter} ({cp}, {group_label} PP, H8 test)\n'
             f'  Generated: {ts}\n\n'
             f'DATA:\n  FILE = "{mplus_dat_filename}";\n\n'
             f'VARIABLE:\n  NAMES =\n    {all_var_names};\n'
             f'  USEVARIABLES =\n    {use_vars};\n'
-            f'  GROUPING = PP_group (0=LowPP 1=HighPP);\n'
+            f'  USEOBSERVATIONS = PP_group EQ {pp_val};\n'
             f'  MISSING = ALL(-999);\n\n'
-            f'ANALYSIS:\n  ESTIMATOR = MLR;\n  ITERATIONS = 10000;\n  CONVERGENCE = 0.000001;\n\n'
+            f'ANALYSIS:\n  ESTIMATOR = MLR;\n  ITERATIONS = 50000;\n  CONVERGENCE = 0.000001;\n'
+            f'  STARTS = 40;\n\n'
             f'MODEL:\n'
-            f'  ! 單一指標（兩組共用定義）\n'
+            f'  ! 單一指標\n'
             f'  {cp}1 BY {cp}_T1@1;  {cp}_T1@0;  {cp}1@0;\n'
             f'  {cp}2 BY {cp}_T2@1;  {cp}_T2@0;  {cp}2@0;\n'
             f'  {cp}3 BY {cp}_T3@1;  {cp}_T3@0;  {cp}3@0;\n'
@@ -2254,39 +2354,40 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
             f'  W{cp}2 ON W{cp}1 (ar_{cpp});  W{cp}3 ON W{cp}2 (ar_{cpp});\n'
             f'  WDP2  ON WDP1  (ar_dp);       WDP3  ON WDP2  (ar_dp);\n'
             f'  WCI2  ON WCI1  (ar_ci);       WCI3  ON WCI2  (ar_ci);\n\n'
-            f'  ! T1/T2/T3 Within-person 共變\n'
+            f'  ! T1 Within-person 共變\n'
             f'  W{cp}1 WITH WDP1;  W{cp}1 WITH WCI1;  WDP1 WITH WCI1;\n'
+            f'  ! T2/T3 殘差共變\n'
             f'  W{cp}2 WITH WDP2;  W{cp}2 WITH WCI2;  WDP2 WITH WCI2;\n'
             f'  W{cp}3 WITH WDP3;  W{cp}3 WITH WCI3;  WDP3 WITH WCI3;\n\n'
             f'  ! 隨機截距共變\n'
             f'  RI_{cp} WITH RI_DP;  RI_{cp} WITH RI_CI;  RI_DP WITH RI_CI;\n\n'
-            f'  ! 六條交叉延遲（configural：兩組各自自由估計）\n'
-            f'  WDP2 ON W{cp}1;  WDP3 ON W{cp}2;\n'
-            f'  WCI2 ON W{cp}1;  WCI3 ON W{cp}2;\n'
-            f'  WCI2 ON WDP1;   WCI3 ON WDP2;\n'
-            f'  W{cp}2 ON WDP1; W{cp}3 ON WDP2;\n'
-            f'  WDP2 ON WCI1;   WDP3 ON WCI2;\n'
-            f'  W{cp}2 ON WCI1; W{cp}3 ON WCI2;\n'
-            f'\n! ------- 約束模型（另存 _Constrained 版本做 chi-square diff test）-------\n'
-            f'! 若要測試 H8，另跑一個模型將上面六條路徑標上等同標籤：\n'
-            f'!   WDP2 ON W{cp}1 (cl_{cpp}_dp);  WDP3 ON W{cp}2 (cl_{cpp}_dp); 等\n'
-            f'! 再做 chi-square difference test（MLR 用 Satorra-Bentler correction）\n'
+            f'  ! ===== 六條雙向交叉延遲路徑 =====\n'
+            f'  WDP2 ON W{cp}1 (cl_{cpp}_dp);  WDP3 ON W{cp}2 (cl_{cpp}_dp);\n'
+            f'  WCI2 ON W{cp}1 (cl_{cpp}_ci);  WCI3 ON W{cp}2 (cl_{cpp}_ci);\n'
+            f'  WCI2 ON WDP1  (cl_dp_ci);      WCI3 ON WDP2  (cl_dp_ci);\n'
+            f'  W{cp}2 ON WDP1 (cl_dp_{cpp});  W{cp}3 ON WDP2 (cl_dp_{cpp});\n'
+            f'  WDP2 ON WCI1  (cl_ci_dp);      WDP3 ON WCI2  (cl_ci_dp);\n'
+            f'  W{cp}2 ON WCI1 (cl_ci_{cpp});  W{cp}3 ON WCI2 (cl_ci_{cpp});\n'
             f'\nOUTPUT:\n  SAMPSTAT;  STDYX;  MODINDICES(10);  CINTERVAL;\n'
         )
 
     ri_models_spec = [
-        (f'RI-CLPM-A (JCP, Bidirectional)',   f'RI_CLPM_A_JCP_Bidir_{ts}',    'JCP', 'AB'),
-        (f'RI-CLPM-B (HP, Bidirectional)',    f'RI_CLPM_B_HP_Bidir_{ts}',     'HP',  'AB'),
-        (f'RI-CLPM-C (JCP, MultiGroup-PP)',   f'RI_CLPM_C_JCP_MultiGrp_{ts}', 'JCP', 'CD'),
-        (f'RI-CLPM-D (HP, MultiGroup-PP)',    f'RI_CLPM_D_HP_MultiGrp_{ts}',  'HP',  'CD'),
+        # (label, fname_stem, cp, mtype, pp_val, group_label)
+        ('RI-CLPM-A (JCP, Bidirectional)',  f'RI_CLPM_A_JCP_Bidir_{ts}',    'JCP', 'AB',  None,  None),
+        ('RI-CLPM-B (HP, Bidirectional)',   f'RI_CLPM_B_HP_Bidir_{ts}',     'HP',  'AB',  None,  None),
+        # H8 subgroup models (separate RI-CLPM per PP group)
+        ('RI-CLPM-C1 (JCP, HighPP)',        f'RI_CLPM_C1_JCP_HiPP_{ts}',   'JCP', 'GRP', 1, 'High'),
+        ('RI-CLPM-C2 (JCP, LowPP)',         f'RI_CLPM_C2_JCP_LoPP_{ts}',   'JCP', 'GRP', 0, 'Low'),
+        ('RI-CLPM-D1 (HP, HighPP)',         f'RI_CLPM_D1_HP_HiPP_{ts}',    'HP',  'GRP', 1, 'High'),
+        ('RI-CLPM-D2 (HP, LowPP)',          f'RI_CLPM_D2_HP_LoPP_{ts}',    'HP',  'GRP', 0, 'Low'),
     ]
 
     ri_inp_list = []
-    for label, fname, cp, mtype in ri_models_spec:
+    for label, fname, cp, mtype, pp_val, group_label in ri_models_spec:
         if mtype == 'AB':
             content = make_riclpm_ab(cp, ts, mplus_dat_filename)
         else:
-            content = make_riclpm_cd_multigroup(cp, ts, mplus_dat_filename)
+            content = make_riclpm_separate_group(cp, ts, mplus_dat_filename, pp_val, group_label)
         utf8_path, _ = save_inp_dual_encoding(content, run_dir, fname)
         ri_inp_list.append((label, utf8_path))
 
@@ -2303,71 +2404,69 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
             all_results[label] = {'fit': parse_mplus_fit(out_path), 'out': out_path}
 
     # ---- 解析 RI-CLPM 結果 ----
-    # Model A/B: 雙向六路徑（H1a/b~H6a/b）；Model C/D: 多群組（configural，各組自由估計）
-    ri_path_maps = {
-        'RI-CLPM-A (JCP, Bidirectional)': {
-            'H1a: JCP→DP': ('WDP2', 'WJCP1'),
-            'H2a: JCP→CI': ('WCI2', 'WJCP1'),
-            'H3:  DP→CI':  ('WCI2', 'WDP1'),
-            'H4a: DP→JCP': ('WJCP2', 'WDP1'),
-            'H5:  CI→DP':  ('WDP2', 'WCI1'),
-            'H6a: CI→JCP': ('WJCP2', 'WCI1'),
-        },
-        'RI-CLPM-B (HP, Bidirectional)': {
-            'H1b: HP→DP':  ('WDP2', 'WHP1'),
-            'H2b: HP→CI':  ('WCI2', 'WHP1'),
-            'H3:  DP→CI':  ('WCI2', 'WDP1'),
-            'H4b: DP→HP':  ('WHP2', 'WDP1'),
-            'H5:  CI→DP':  ('WDP2', 'WCI1'),
-            'H6b: CI→HP':  ('WHP2', 'WCI1'),
-        },
-        # Models C/D are multi-group (configural); paths parsed per group via group-specific output
-        # Cross-lagged labels match the configural (unconstrained) group sections
-        'RI-CLPM-C (JCP, MultiGroup-PP)': {
-            'H1a: JCP→DP [configural]': ('WDP2', 'WJCP1'),
-            'H2a: JCP→CI [configural]': ('WCI2', 'WJCP1'),
-            'H3:  DP→CI  [configural]': ('WCI2', 'WDP1'),
-            'H4a: DP→JCP [configural]': ('WJCP2', 'WDP1'),
-            'H5:  CI→DP  [configural]': ('WDP2', 'WCI1'),
-            'H6a: CI→JCP [configural]': ('WJCP2', 'WCI1'),
-        },
-        'RI-CLPM-D (HP, MultiGroup-PP)': {
-            'H1b: HP→DP  [configural]': ('WDP2', 'WHP1'),
-            'H2b: HP→CI  [configural]': ('WCI2', 'WHP1'),
-            'H3:  DP→CI  [configural]': ('WCI2', 'WDP1'),
-            'H4b: DP→HP  [configural]': ('WHP2', 'WDP1'),
-            'H5:  CI→DP  [configural]': ('WDP2', 'WCI1'),
-            'H6b: CI→HP  [configural]': ('WHP2', 'WCI1'),
-        },
+    # Models A/B: 雙向六路徑 + MODEL INDIRECT (H7 中介)
+    # Models C1/C2/D1/D2: 各PP群組分別跑 (H8 比較)
+    _jcp_paths = {
+        'H1a: JCP→DP': ('WDP2', 'WJCP1'),
+        'H2a: JCP→CI': ('WCI2', 'WJCP1'),
+        'H3:  DP→CI':  ('WCI2', 'WDP1'),
+        'H4a: DP→JCP': ('WJCP2', 'WDP1'),
+        'H5:  CI→DP':  ('WDP2', 'WCI1'),
+        'H6a: CI→JCP': ('WJCP2', 'WCI1'),
     }
+    _hp_paths = {
+        'H1b: HP→DP':  ('WDP2', 'WHP1'),
+        'H2b: HP→CI':  ('WCI2', 'WHP1'),
+        'H3:  DP→CI':  ('WCI2', 'WDP1'),
+        'H4b: DP→HP':  ('WHP2', 'WDP1'),
+        'H5:  CI→DP':  ('WDP2', 'WCI1'),
+        'H6b: CI→HP':  ('WHP2', 'WCI1'),
+    }
+    ri_path_maps = {
+        'RI-CLPM-A (JCP, Bidirectional)':  _jcp_paths,
+        'RI-CLPM-B (HP, Bidirectional)':   _hp_paths,
+        'RI-CLPM-C1 (JCP, HighPP)':        _jcp_paths,
+        'RI-CLPM-C2 (JCP, LowPP)':         _jcp_paths,
+        'RI-CLPM-D1 (HP, HighPP)':         _hp_paths,
+        'RI-CLPM-D2 (HP, LowPP)':          _hp_paths,
+    }
+    _jcp_corr = [
+        ('RI_JCP↔RI_DP', 'RI_JCP', 'RI_DP'),
+        ('RI_JCP↔RI_CI', 'RI_JCP', 'RI_CI'),
+        ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')]
+    _hp_corr = [
+        ('RI_HP↔RI_DP',  'RI_HP',  'RI_DP'),
+        ('RI_HP↔RI_CI',  'RI_HP',  'RI_CI'),
+        ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')]
     ri_corr_maps = {
+        'RI-CLPM-A (JCP, Bidirectional)':  _jcp_corr,
+        'RI-CLPM-B (HP, Bidirectional)':   _hp_corr,
+        'RI-CLPM-C1 (JCP, HighPP)':        _jcp_corr,
+        'RI-CLPM-C2 (JCP, LowPP)':         _jcp_corr,
+        'RI-CLPM-D1 (HP, HighPP)':         _hp_corr,
+        'RI-CLPM-D2 (HP, LowPP)':          _hp_corr,
+    }
+    # MODEL INDIRECT specs: (label, X, M, Y) — only for Models A and B
+    ri_indirect_maps = {
         'RI-CLPM-A (JCP, Bidirectional)': [
-            ('RI_JCP↔RI_DP', 'RI_JCP', 'RI_DP'),
-            ('RI_JCP↔RI_CI', 'RI_JCP', 'RI_CI'),
-            ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')],
+            ('H7a: JCP→DP→CI', 'WJCP1', 'WDP2', 'WCI3'),
+        ],
         'RI-CLPM-B (HP, Bidirectional)': [
-            ('RI_HP↔RI_DP',  'RI_HP',  'RI_DP'),
-            ('RI_HP↔RI_CI',  'RI_HP',  'RI_CI'),
-            ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')],
-        'RI-CLPM-C (JCP, MultiGroup-PP)': [
-            ('RI_JCP↔RI_DP', 'RI_JCP', 'RI_DP'),
-            ('RI_JCP↔RI_CI', 'RI_JCP', 'RI_CI'),
-            ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')],
-        'RI-CLPM-D (HP, MultiGroup-PP)': [
-            ('RI_HP↔RI_DP',  'RI_HP',  'RI_DP'),
-            ('RI_HP↔RI_CI',  'RI_HP',  'RI_CI'),
-            ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')],
+            ('H7b: HP→DP→CI',  'WHP1',  'WDP2', 'WCI3'),
+        ],
     }
 
     for label, ok, out_path, err in ri_run_results:
         if ok:
-            path_map = ri_path_maps.get(label, {})
-            corr_pairs = ri_corr_maps.get(label, [])
+            path_map     = ri_path_maps.get(label, {})
+            corr_pairs   = ri_corr_maps.get(label, [])
+            indir_specs  = ri_indirect_maps.get(label, [])
             all_results[label] = {
-                'fit':    parse_mplus_fit(out_path),
-                'paths':  parse_mplus_stdyx(out_path, path_map),
-                'ri_corr': parse_mplus_ri_corr(out_path, corr_pairs),
-                'out':    out_path
+                'fit':      parse_mplus_fit(out_path),
+                'paths':    parse_mplus_stdyx(out_path, path_map),
+                'ri_corr':  parse_mplus_ri_corr(out_path, corr_pairs),
+                'indirect': parse_mplus_indirect(out_path, indir_specs),
+                'out':      out_path
             }
 
     return all_results, cfa_inp_list + ri_inp_list
@@ -2386,7 +2485,9 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
       Sheet 5: RI-CLPM 適配指數（4 個模型）
       Sheet 6: RI-CLPM Within-person 路徑係數（STDYX）
       Sheet 7: RI-CLPM Between-person 隨機截距相關
-      Sheet 8: Mplus 語法（所有 .inp 檔內容）
+      Sheet 8: H7 中介間接效果（MODEL INDIRECT，JCP/HP→DP→CI）
+      Sheet 9: Mplus 語法（所有 .inp 檔內容）
+      Sheet 10: 各量表題目 Item-level 描述統計 + 刪題建議
       Sheet 9: 各量表題目 Item-level 描述統計
     """
     try:
@@ -2658,10 +2759,12 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
 
     ws5 = wb.create_sheet("5_RICLPM適配")
     write_fit_sheet(ws5, f"RI-CLPM 適配指數（parcel 合成分數，N = {n_total}）", {
-        'RI-CLPM-A (JCP, Bidirectional)':  'JCP 雙向六路徑（H1b~H6b）',
-        'RI-CLPM-B (HP, Bidirectional)':   'HP 雙向六路徑（H1a~H6a）',
-        'RI-CLPM-C (JCP, MultiGroup-PP)':  'JCP 多群組（高/低PP，H8b）',
-        'RI-CLPM-D (HP, MultiGroup-PP)':   'HP 多群組（高/低PP，H8a）',
+        'RI-CLPM-A (JCP, Bidirectional)':  'JCP 雙向六路徑（H1a~H6a，含H7a中介）',
+        'RI-CLPM-B (HP, Bidirectional)':   'HP 雙向六路徑（H1b~H6b，含H7b中介）',
+        'RI-CLPM-C1 (JCP, HighPP)':        'JCP 高PP子群（H8a比較組）',
+        'RI-CLPM-C2 (JCP, LowPP)':         'JCP 低PP子群（H8a比較組）',
+        'RI-CLPM-D1 (HP, HighPP)':         'HP 高PP子群（H8b比較組）',
+        'RI-CLPM-D2 (HP, LowPP)':          'HP 低PP子群（H8b比較組）',
     })
 
     # ── Sheet 6: RI-CLPM Within-person 路徑係數 ──────────────────
@@ -2676,8 +2779,10 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ri_model_order = [
         'RI-CLPM-A (JCP, Bidirectional)',
         'RI-CLPM-B (HP, Bidirectional)',
-        'RI-CLPM-C (JCP, MultiGroup-PP)',
-        'RI-CLPM-D (HP, MultiGroup-PP)',
+        'RI-CLPM-C1 (JCP, HighPP)',
+        'RI-CLPM-C2 (JCP, LowPP)',
+        'RI-CLPM-D1 (HP, HighPP)',
+        'RI-CLPM-D2 (HP, LowPP)',
     ]
     for mkey in ri_model_order:
         paths = all_results.get(mkey, {}).get('paths', {})
@@ -2757,8 +2862,63 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ws7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
     set_widths(ws7, [('A', 28), ('B', 18), ('C', 10), ('D', 12), ('E', 12), ('F', 14)])
 
-    # ── Sheet 8: Mplus 語法（.inp 內容）─────────────────────────
-    ws8 = wb.create_sheet("8_Mplus語法")
+    # ── Sheet 8: H7 間接效果（MODEL INDIRECT 結果）──────────────
+    ws_h7 = wb.create_sheet("8_H7間接效果")
+    title(ws_h7,
+          "H7 中介效果：CP(T1)→DP(T2)→CI(T3) Within-person 間接效果（STDYX，MLR）",
+          end_col=8)
+    r = 3
+    for ci, h in enumerate(
+            ["模型", "路徑", "β_indirect", "SE", "z值", "p值", "95% CI", "結論"], 1):
+        hdr(ws_h7, r, ci, h)
+    r += 1
+
+    for mkey in ['RI-CLPM-A (JCP, Bidirectional)', 'RI-CLPM-B (HP, Bidirectional)']:
+        indir = all_results.get(mkey, {}).get('indirect', {})
+        if not indir:
+            cell(ws_h7, r, 1, mkey, bold=True, align='left')
+            cell(ws_h7, r, 2, '（尚未執行或 MODEL INDIRECT 未解析，請確認 .out 檔）',
+                 align='left')
+            for ci in range(3, 9):
+                cell(ws_h7, r, ci, '')
+            r += 1
+            continue
+        first = True
+        for path_label, idata in indir.items():
+            est   = idata.get('est',   np.nan)
+            se    = idata.get('se',    np.nan)
+            z     = idata.get('z',     np.nan)
+            pv    = idata.get('p',     np.nan)
+            ci_lo = idata.get('ci_lo', np.nan)
+            ci_hi = idata.get('ci_hi', np.nan)
+            sig   = idata.get('sig',   False)
+            p_str = (f"{pv:.3f}" if not np.isnan(pv) else 'N/A')
+            ci_str = (f"[{ci_lo:.3f}, {ci_hi:.3f}]"
+                      if not (np.isnan(ci_lo) or np.isnan(ci_hi)) else 'N/A')
+            cell(ws_h7, r, 1, mkey if first else '', bold=first, align='left')
+            cell(ws_h7, r, 2, path_label, align='left')
+            cell(ws_h7, r, 3, f"{est:.3f}*" if sig and not np.isnan(est)
+                 else (f"{est:.3f}" if not np.isnan(est) else 'N/A'))
+            cell(ws_h7, r, 4, f"{se:.3f}"  if not np.isnan(se) else 'N/A')
+            cell(ws_h7, r, 5, f"{z:.3f}"   if not np.isnan(z)  else 'N/A')
+            cell(ws_h7, r, 6, p_str)
+            cell(ws_h7, r, 7, ci_str)
+            cell(ws_h7, r, 8, '顯著 ✅' if sig else '不顯著',
+                 color='006100' if sig else '000000', bold=sig)
+            first = False
+            r += 1
+
+    r += 1
+    ws_h7.cell(row=r, column=1,
+               value="* p<.05；間接效果 = β(CP→DP) × β(DP→CI)；95% CI 不含 0 即顯著"
+               ).font = Font(italic=True, size=9)
+    ws_h7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    set_widths(ws_h7, [('A', 28), ('B', 22), ('C', 14), ('D', 8),
+                       ('E', 8), ('F', 10), ('G', 18), ('H', 10)])
+
+    # ── Sheet 9: Mplus 語法（.inp 內容）─────────────────────────
+    # (renumbered from Sheet 8 to accommodate new H7 indirect effects sheet)
+    ws8 = wb.create_sheet("9_Mplus語法")
     ws8.cell(row=1, column=1,
              value="Mplus 分析語法（.inp）— 可直接複製至 Mplus 執行"
              ).font = Font(bold=True, size=12)
@@ -2802,17 +2962,57 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         ws8.row_dimensions[r8].height = max(80, syntax.count('\n') * 12)
         r8 += 1
 
-    # ── Sheet 9: 各量表題目 item-level 描述統計 ─────────────────
-    ws9 = wb.create_sheet("9_量表題目統計")
-    ws9.cell(row=1, column=1,
-             value=f"各量表 Item-level 描述統計（三波完整樣本，N = {n_total}）"
-             ).font = Font(bold=True, size=12)
-    ws9.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
+    # ── 輔助：計算 CITC（校正後題項-總分相關）與刪題後 α ──────────
+    def _citc_and_alpha_if_deleted(df_sub, all_cols, target_col):
+        """
+        CITC = 題目與「其餘題目總分」的 Pearson r
+        Alpha_if_deleted = 刪掉此題後剩餘題目的 Cronbach's α
+        """
+        rest_cols = [c for c in all_cols if c != target_col]
+        valid     = [c for c in rest_cols if c in df_sub.columns]
+        if len(valid) < 2:
+            return np.nan, np.nan
+        data = df_sub[[target_col] + valid].dropna()
+        if len(data) < 5:
+            return np.nan, np.nan
+        rest_sum = data[valid].sum(axis=1)
+        citc = data[target_col].corr(rest_sum)
+        # Alpha if deleted
+        k   = len(valid)
+        var_items = data[valid].var(axis=0, ddof=1).sum()
+        var_total = data[valid].sum(axis=1).var(ddof=1)
+        alpha_del = (k / (k - 1)) * (1 - var_items / var_total) if (k > 1 and var_total > 0) else np.nan
+        return round(citc, 3), round(alpha_del, 3)
 
-    hdr_cols = ["量表", "波次", "題號", "題幹（變數名）",
-                "M", "SD", "最小值", "最大值"]
+    def _cronbach(df_sub, cols):
+        valid = [c for c in cols if c in df_sub.columns]
+        data  = df_sub[valid].dropna()
+        if len(data) < 2 or len(valid) < 2:
+            return np.nan
+        k = len(valid)
+        var_sum   = data.var(axis=0, ddof=1).sum()
+        var_total = data.sum(axis=1).var(ddof=1)
+        return round((k / (k - 1)) * (1 - var_sum / var_total), 3) if var_total > 0 else np.nan
+
+    # ── Sheet 10: 各量表題目 item-level 描述統計 + 刪題建議 ────────
+    ws9 = wb.create_sheet("10_量表題目統計")
+    ws9.cell(row=1, column=1,
+             value=f"各量表 Item-level 描述統計 + 刪題建議（三波完整樣本，N = {n_total}）"
+             ).font = Font(bold=True, size=12)
+    ws9.merge_cells(start_row=1, start_column=1, end_row=1, end_column=12)
+
+    note_row = 2
+    ws9.cell(row=note_row, column=1,
+             value="刪題標準：CITC < .30 或「刪題後α > 量表α」→ 建議刪題（紅色標示）"
+             ).font = Font(italic=True, size=9, color='C00000')
+    ws9.merge_cells(start_row=note_row, start_column=1,
+                    end_row=note_row, end_column=12)
+
+    hdr_cols = ["量表", "波次", "題號", "變數名",
+                "M", "SD", "Min", "Max",
+                "CITC", "刪題後α", "量表α", "刪題建議"]
     for ci, h in enumerate(hdr_cols, 1):
-        hdr(ws9, 2, ci, h)
+        hdr(ws9, 3, ci, h)
 
     # 量表定義：(中文名稱, 英文代碼, 題數)
     scale_defs = [
@@ -2824,39 +3024,69 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ]
     waves = ['T1', 'T2', 'T3']
 
-    r9 = 3
+    fill_del  = PatternFill("solid", fgColor="FFE0E0")   # 淡紅：建議刪
+    fill_ok   = PatternFill("solid", fgColor="E2EFDA")   # 淡綠：保留
+    fill_warn = PatternFill("solid", fgColor="FFF2CC")   # 黃：邊界
+
+    r9 = 4
     for scale_zh, scale_code, n_items in scale_defs:
         for wave in waves:
+            all_cols_wave = [f"{scale_code}{j}_{wave}" for j in range(1, n_items + 1)]
+            scale_alpha   = _cronbach(df, all_cols_wave)
+
             for i in range(1, n_items + 1):
                 col_name = f"{scale_code}{i}_{wave}"
                 if col_name not in df.columns:
                     continue
-                s = df[col_name].dropna()
-                c1 = ws9.cell(row=r9, column=1, value=scale_zh)
-                c1.font = Font(size=10, bold=(i == 1 and wave == 'T1'))
-                c1.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-                c1.border = bdr
-                for ci, val in enumerate([
+                s    = df[col_name].dropna()
+                citc, alpha_del = _citc_and_alpha_if_deleted(df, all_cols_wave, col_name)
+
+                # 刪題判斷
+                delete_citc  = (not np.isnan(citc))  and citc  < 0.30
+                delete_alpha = (not np.isnan(alpha_del) and not np.isnan(scale_alpha)) \
+                               and alpha_del > scale_alpha
+                suggest_del  = delete_citc or delete_alpha
+                border_case  = (not np.isnan(citc)) and (0.30 <= citc < 0.40)
+
+                suggestion = '建議刪題 ⚠️' if suggest_del else ('邊界，留意' if border_case else '保留 ✓')
+                row_fill   = fill_del if suggest_del else (fill_warn if border_case else fill_ok)
+
+                vals = [
                     scale_zh, wave, f'{scale_code}{i}', col_name,
                     round(float(s.mean()), 3) if len(s) > 0 else 'N/A',
                     round(float(s.std()),  3) if len(s) > 0 else 'N/A',
                     round(float(s.min()),  1) if len(s) > 0 else 'N/A',
                     round(float(s.max()),  1) if len(s) > 0 else 'N/A',
-                ], 1):
-                    c = ws9.cell(row=r9, column=ci, value=val)
-                    c.font = Font(size=10)
+                    citc       if not np.isnan(citc)       else 'N/A',
+                    alpha_del  if not np.isnan(alpha_del)  else 'N/A',
+                    scale_alpha if not np.isnan(scale_alpha) else 'N/A',
+                    suggestion,
+                ]
+                for ci_idx, val in enumerate(vals, 1):
+                    c = ws9.cell(row=r9, column=ci_idx, value=val)
+                    c.font = Font(
+                        size=10,
+                        bold=(ci_idx == 12 and suggest_del),
+                        color='C00000' if (ci_idx == 12 and suggest_del) else '000000'
+                    )
                     c.alignment = Alignment(
-                        horizontal='left' if ci <= 4 else 'center',
+                        horizontal='left' if ci_idx <= 4 else 'center',
                         vertical='center')
                     c.border = bdr
+                    c.fill = row_fill
                 r9 += 1
-            # blank separator between waves
-            r9 += 1
-        r9 += 1  # blank separator between scales
 
-    set_widths(ws9, [('A', 22), ('B', 6), ('C', 8), ('D', 18),
-                     ('E', 8), ('F', 8), ('G', 8), ('H', 8)])
-    ws9.freeze_panes = ws9['A3']
+            # 空行分隔波次
+            r9 += 1
+        # 空行分隔量表
+        r9 += 1
+
+    set_widths(ws9, [
+        ('A', 20), ('B', 6), ('C', 8), ('D', 14),
+        ('E', 7),  ('F', 7), ('G', 6), ('H', 6),
+        ('I', 7),  ('J', 9), ('K', 8), ('L', 14),
+    ])
+    ws9.freeze_panes = ws9['A4']
 
     # ── 儲存 ─────────────────────────────────────────────────────
     excel_path = os.path.join(run_dir, f"Thesis_Results_{ts}.xlsx")
