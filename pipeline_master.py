@@ -1502,6 +1502,271 @@ RELIABILITY
 """
 
 
+def generate_spss_analysis_syntax(analysis_path, ts, pp_median=3.5, n_total=340):
+    """
+    產出完整 SPSS 分析語法：
+      步驟 0：篩選三波完整樣本 (Group=3)
+      步驟 1：計算合成分數（各量表 T1/T2/T3 平均）
+      步驟 2：PP 中位數分群（PP_group：0=低PP, 1=高PP）
+      步驟 3：人口統計頻率分佈（FREQUENCIES）
+      步驟 4：量表描述統計（DESCRIPTIVES，各波合成分數）
+      步驟 5：Pearson 相關矩陣（T1 合成分數）
+      步驟 6：Harman 共同方法偏差單因子檢定（CMV）
+      步驟 7：常態性檢定（EXAMINE）
+    """
+    return f"""\
+* ============================================================.
+* 完整 SPSS 分析語法 — 自動產生 {ts}.
+* 執行前請先開啟並執行 SPSS_Syntax_{ts}.sps（匯入資料）.
+* 資料來源：{analysis_path}.
+* N（三波完整）= {n_total}.
+* ============================================================.
+
+* ============================================================.
+* 步驟 0：篩選三波完整樣本（N = {n_total}）.
+* ============================================================.
+SELECT IF (Group = 3).
+EXECUTE.
+
+
+* ============================================================.
+* 步驟 1：計算合成分數（各量表各波次題目平均值）.
+* 注意：反向題已於資料清理時處理，無需再反向.
+* ============================================================.
+
+* --- T1 合成分數 ---.
+COMPUTE HP_T1  = MEAN(HP1_T1,  HP2_T1,  HP3_T1,  HP4_T1,  HP5_T1,  HP6_T1).
+COMPUTE JCP_T1 = MEAN(JCP1_T1, JCP2_T1, JCP3_T1, JCP4_T1, JCP5_T1, JCP6_T1).
+COMPUTE PP_T1  = MEAN(PP1_T1,  PP2_T1,  PP3_T1,  PP4_T1,  PP5_T1,  PP6_T1).
+COMPUTE DP_T1  = MEAN(DP1_T1,  DP2_T1,  DP3_T1,  DP4_T1,  DP5_T1).
+COMPUTE CI_T1  = MEAN(CI1_T1,  CI2_T1,  CI3_T1,  CI4_T1,  CI5_T1,
+                       CI6_T1,  CI7_T1,  CI8_T1).
+VARIABLE LABELS
+  HP_T1  'HP 階層停滯 T1（合成分數）'
+  JCP_T1 'JCP 工作內容停滯 T1（合成分數）'
+  PP_T1  'PP 主動型人格 T1（合成分數）'
+  DP_T1  'DP 決策拖延 T1（合成分數）'
+  CI_T1  'CI 職涯無所作為 T1（合成分數）'.
+
+* --- T2 合成分數 ---.
+COMPUTE HP_T2  = MEAN(HP1_T2,  HP2_T2,  HP3_T2,  HP4_T2,  HP5_T2,  HP6_T2).
+COMPUTE JCP_T2 = MEAN(JCP1_T2, JCP2_T2, JCP3_T2, JCP4_T2, JCP5_T2, JCP6_T2).
+COMPUTE PP_T2  = MEAN(PP1_T2,  PP2_T2,  PP3_T2,  PP4_T2,  PP5_T2,  PP6_T2).
+COMPUTE DP_T2  = MEAN(DP1_T2,  DP2_T2,  DP3_T2,  DP4_T2,  DP5_T2).
+COMPUTE CI_T2  = MEAN(CI1_T2,  CI2_T2,  CI3_T2,  CI4_T2,  CI5_T2,
+                       CI6_T2,  CI7_T2,  CI8_T2).
+VARIABLE LABELS
+  HP_T2  'HP 階層停滯 T2（合成分數）'
+  JCP_T2 'JCP 工作內容停滯 T2（合成分數）'
+  PP_T2  'PP 主動型人格 T2（合成分數）'
+  DP_T2  'DP 決策拖延 T2（合成分數）'
+  CI_T2  'CI 職涯無所作為 T2（合成分數）'.
+
+* --- T3 合成分數 ---.
+COMPUTE HP_T3  = MEAN(HP1_T3,  HP2_T3,  HP3_T3,  HP4_T3,  HP5_T3,  HP6_T3).
+COMPUTE JCP_T3 = MEAN(JCP1_T3, JCP2_T3, JCP3_T3, JCP4_T3, JCP5_T3, JCP6_T3).
+COMPUTE PP_T3  = MEAN(PP1_T3,  PP2_T3,  PP3_T3,  PP4_T3,  PP5_T3,  PP6_T3).
+COMPUTE DP_T3  = MEAN(DP1_T3,  DP2_T3,  DP3_T3,  DP4_T3,  DP5_T3).
+COMPUTE CI_T3  = MEAN(CI1_T3,  CI2_T3,  CI3_T3,  CI4_T3,  CI5_T3,
+                       CI6_T3,  CI7_T3,  CI8_T3).
+VARIABLE LABELS
+  HP_T3  'HP 階層停滯 T3（合成分數）'
+  JCP_T3 'JCP 工作內容停滯 T3（合成分數）'
+  PP_T3  'PP 主動型人格 T3（合成分數）'
+  DP_T3  'DP 決策拖延 T3（合成分數）'
+  CI_T3  'CI 職涯無所作為 T3（合成分數）'.
+
+EXECUTE.
+
+
+* ============================================================.
+* 步驟 2：PP 中位數分群（H8 調節效果子群）.
+* 中位數 = {pp_median}（由三波完整樣本 T1 PP 中位數計算）.
+* PP_group：0 = 低PP（≤中位數），1 = 高PP（>中位數）.
+* ============================================================.
+COMPUTE PP_group = 0.
+IF (PP_T1 > {pp_median}) PP_group = 1.
+EXECUTE.
+VARIABLE LABELS PP_group 'PP 中位數分群（0=低PP, 1=高PP）'.
+VALUE LABELS PP_group
+  0 '低PP（≤{pp_median}）'
+  1 '高PP（>{pp_median}）'.
+FREQUENCIES VARIABLES = PP_group.
+
+
+* ============================================================.
+* 步驟 3：人口統計背景變項頻率分佈.
+* ============================================================.
+FREQUENCIES VARIABLES = Gender Education Marriage Position Industry OrgSize
+  /STATISTICS = MINIMUM MAXIMUM
+  /ORDER = ANALYSIS.
+
+* 年齡描述統計（連續變數）.
+DESCRIPTIVES VARIABLES = Age NowJobTenure JobTenure
+  /STATISTICS = MEAN STDDEV MIN MAX.
+
+* 績效考核現況.
+FREQUENCIES VARIABLES = PM_Has PM_Result PM_Help.
+
+
+* ============================================================.
+* 步驟 4：各量表合成分數描述統計（三波次）.
+* 輸出：平均數、標準差、偏態、峰態.
+* ============================================================.
+DESCRIPTIVES
+  VARIABLES = HP_T1  JCP_T1  PP_T1  DP_T1  CI_T1
+              HP_T2  JCP_T2  PP_T2  DP_T2  CI_T2
+              HP_T3  JCP_T3  PP_T3  DP_T3  CI_T3
+  /STATISTICS = MEAN STDDEV MIN MAX SKEWNESS KURTOSIS.
+
+
+* ============================================================.
+* 步驟 5：Pearson 相關矩陣（T1 合成分數）.
+* 論文表格：Table 3.
+* ============================================================.
+CORRELATIONS
+  /VARIABLES = HP_T1 JCP_T1 PP_T1 DP_T1 CI_T1
+  /PRINT = TWOTAIL SIG
+  /MISSING = PAIRWISE.
+
+* 跨波相關（三波合成分數完整矩陣）.
+CORRELATIONS
+  /VARIABLES = HP_T1 JCP_T1 PP_T1 DP_T1 CI_T1
+               HP_T2 JCP_T2 PP_T2 DP_T2 CI_T2
+               HP_T3 JCP_T3 PP_T3 DP_T3 CI_T3
+  /PRINT = TWOTAIL SIG
+  /MISSING = PAIRWISE.
+
+
+* ============================================================.
+* 步驟 6：Harman 共同方法偏差（CMV）單因子檢定.
+* 方法：對所有 T1 題目做 EFA，強制單因子，.
+*   看第一個因子解釋的變異量是否 < 50%.
+* 建議報告：「強制單因子所解釋的總變異量為 XX%，.
+*            低於 50% 標準，共同方法偏差問題不嚴重。」.
+* ============================================================.
+FACTOR
+  /VARIABLES = HP1_T1 HP2_T1 HP3_T1 HP4_T1 HP5_T1 HP6_T1
+               JCP1_T1 JCP2_T1 JCP3_T1 JCP4_T1 JCP5_T1 JCP6_T1
+               PP1_T1 PP2_T1 PP3_T1 PP4_T1 PP5_T1 PP6_T1
+               DP1_T1 DP2_T1 DP3_T1 DP4_T1 DP5_T1
+               CI1_T1 CI2_T1 CI3_T1 CI4_T1 CI5_T1 CI6_T1 CI7_T1 CI8_T1
+  /MISSING = LISTWISE
+  /ANALYSIS = HP1_T1 TO CI8_T1
+  /PRINT = INITIAL KMO EXTRACTION
+  /CRITERIA = FACTORS(1)
+  /EXTRACTION = PC
+  /ROTATION = NOROTATE
+  /METHOD = CORRELATION.
+* 重點看：「Total Variance Explained」表格第一行的 % of Variance 欄位.
+* 若 < 50%，CMV 不嚴重（Harman's Single Factor Test 通過）.
+
+
+* ============================================================.
+* 步驟 7：常態性檢定（Shapiro-Wilk / K-S）.
+* 注意：SPSS EXAMINE 在 N>50 時自動只顯示 K-S，N≤50 才顯示 Shapiro-Wilk.
+* 建議：若偏態 < |2| 且峰態 < |7| 即符合近似常態（步驟4已可看）.
+* ============================================================.
+EXAMINE VARIABLES = HP_T1 JCP_T1 PP_T1 DP_T1 CI_T1
+  /PLOT NONE
+  /STATISTICS DESCRIPTIVES
+  /CINTERVAL 95
+  /MISSING LISTWISE
+  /NOTOTAL.
+
+
+* ============================================================.
+* 步驟 8：信度分析（CITC + Alpha-if-Deleted）.
+* 關鍵輸出：「Item-Total Statistics」表格.
+*   - Corrected Item-Total Correlation（CITC）< .30 → 考慮刪題.
+*   - Cronbach's Alpha if Item Deleted > 整體 α → 考慮刪題.
+* ============================================================.
+* --- HP 階層停滯（T1）---.
+RELIABILITY
+  /VARIABLES = HP1_T1 HP2_T1 HP3_T1 HP4_T1 HP5_T1 HP6_T1
+  /SCALE('HP 階層停滯 T1') ALL
+  /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE
+  /SUMMARY = TOTAL.
+* 以上輸出中：「Corrected Item-Total Correlation」欄即為 CITC.
+* 「Cronbach's Alpha if Item Deleted」欄為刪題後 Alpha.
+
+* --- JCP 工作內容停滯（T1）---.
+RELIABILITY
+  /VARIABLES = JCP1_T1 JCP2_T1 JCP3_T1 JCP4_T1 JCP5_T1 JCP6_T1
+  /SCALE('JCP 工作內容停滯 T1') ALL
+  /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE
+  /SUMMARY = TOTAL.
+
+* --- PP 主動型人格（T1）---.
+RELIABILITY
+  /VARIABLES = PP1_T1 PP2_T1 PP3_T1 PP4_T1 PP5_T1 PP6_T1
+  /SCALE('PP 主動型人格 T1') ALL
+  /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE
+  /SUMMARY = TOTAL.
+
+* --- DP 決策拖延（T1）---.
+RELIABILITY
+  /VARIABLES = DP1_T1 DP2_T1 DP3_T1 DP4_T1 DP5_T1
+  /SCALE('DP 決策拖延 T1') ALL
+  /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE
+  /SUMMARY = TOTAL.
+
+* --- CI 職涯無所作為（T1）---.
+RELIABILITY
+  /VARIABLES = CI1_T1 CI2_T1 CI3_T1 CI4_T1 CI5_T1 CI6_T1 CI7_T1 CI8_T1
+  /SCALE('CI 職涯無所作為 T1') ALL
+  /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE
+  /SUMMARY = TOTAL.
+
+* --- T2 信度 ---.
+RELIABILITY /VARIABLES = HP1_T2 HP2_T2 HP3_T2 HP4_T2 HP5_T2 HP6_T2
+  /SCALE('HP T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY /VARIABLES = JCP1_T2 JCP2_T2 JCP3_T2 JCP4_T2 JCP5_T2 JCP6_T2
+  /SCALE('JCP T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY /VARIABLES = PP1_T2 PP2_T2 PP3_T2 PP4_T2 PP5_T2 PP6_T2
+  /SCALE('PP T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY /VARIABLES = DP1_T2 DP2_T2 DP3_T2 DP4_T2 DP5_T2
+  /SCALE('DP T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY /VARIABLES = CI1_T2 CI2_T2 CI3_T2 CI4_T2 CI5_T2 CI6_T2 CI7_T2 CI8_T2
+  /SCALE('CI T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+
+* --- T3 信度 ---.
+RELIABILITY /VARIABLES = HP1_T3 HP2_T3 HP3_T3 HP4_T3 HP5_T3 HP6_T3
+  /SCALE('HP T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY /VARIABLES = JCP1_T3 JCP2_T3 JCP3_T3 JCP4_T3 JCP5_T3 JCP6_T3
+  /SCALE('JCP T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY /VARIABLES = PP1_T3 PP2_T3 PP3_T3 PP4_T3 PP5_T3 PP6_T3
+  /SCALE('PP T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY /VARIABLES = DP1_T3 DP2_T3 DP3_T3 DP4_T3 DP5_T3
+  /SCALE('DP T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY /VARIABLES = CI1_T3 CI2_T3 CI3_T3 CI4_T3 CI5_T3 CI6_T3 CI7_T3 CI8_T3
+  /SCALE('CI T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+
+
+* ============================================================.
+* 步驟 9：高/低 PP 群組比較（獨立樣本 t 檢定）.
+* 目的：確認 PP 中位數分群的效度 / H8 輔助描述.
+* ============================================================.
+T-TEST GROUPS = PP_group(0 1)
+  /MISSING = ANALYSIS
+  /VARIABLES = HP_T1 JCP_T1 DP_T1 CI_T1
+  /CRITERIA = CI(.95).
+
+
+* ============================================================.
+* 結束語.
+* ============================================================.
+* 以上完成所有 SPSS 可執行分析.
+* CFA 量測模型、測量恆等性、RI-CLPM 請使用 Mplus 語法（.inp）執行.
+* 詳見同目錄下的 Mplus .inp 語法檔.
+"""
+
+
 # ==========================================
 # CFA 用 dat 檔（原始題目，T1）
 # ==========================================
@@ -3191,11 +3456,21 @@ def main():
     with open(spss_sps_path, 'w', encoding='utf-8-sig') as f:
         f.write(spss_syntax)
 
-    # === 產出 SPSS 信度分析語法 ===
+    # === 產出 SPSS 信度分析語法（舊版，保留向後相容）===
     spss_rel_syntax = generate_spss_reliability_syntax(analysis_path, ts)
     spss_rel_path = os.path.join(run_dir, f"SPSS_Reliability_{ts}.sps")
     with open(spss_rel_path, 'w', encoding='utf-8-sig') as f:
         f.write(spss_rel_syntax)
+
+    # === 產出 SPSS 完整分析語法（新版，含 CMV/相關/描述統計/CITC）===
+    _pp_cols = [f'PP{i+1}_T1' for i in range(6)]
+    _pp_series = g3_sample[[c for c in _pp_cols if c in g3_sample.columns]].mean(axis=1)
+    _pp_median = round(float(_pp_series.median()), 3)
+    spss_analysis_syntax = generate_spss_analysis_syntax(
+        analysis_path, ts, pp_median=_pp_median, n_total=len(g3_sample))
+    spss_analysis_path = os.path.join(run_dir, f"SPSS_Analysis_{ts}.sps")
+    with open(spss_analysis_path, 'w', encoding='utf-8-sig') as f:
+        f.write(spss_analysis_syntax)
 
     # === 產出 R 語法檔 (單一 CP 合併版) ===
     r_script_content = generate_r_script(csv_filename)
@@ -3268,7 +3543,8 @@ def main():
         f"| 工具 | 分析目的 | 檔案 |\n"
         f"|---|---|---|\n"
         f"| SPSS | 匯入資料 + 變數標籤 | `SPSS_Syntax_{ts}.sps` |\n"
-        f"| SPSS | 信度分析（Cronbach's α） | `SPSS_Reliability_{ts}.sps` |\n"
+        f"| SPSS | **完整分析**（描述統計/相關/CMV/CITC/t檢定）| `SPSS_Analysis_{ts}.sps` |\n"
+        f"| SPSS | 信度分析（舊版，已整合入 Analysis）| `SPSS_Reliability_{ts}.sps` |\n"
         f"| Mplus | **M1** 五因子 CFA（HP/JCP/PP/DP/CI）| `CFA_M1_FiveFactor_{ts}.inp` |\n"
         f"| Mplus | **M2** 四因子 CFA（CP合併/PP/DP/CI）| `CFA_M2_FourFactor_CP_merged_{ts}.inp` |\n"
         f"| Mplus | **M3** 三因子 CFA（CP/DP/CI 主路徑）| `CFA_M3_ThreeFactor_CP_DP_CI_{ts}.inp` |\n"
@@ -3281,9 +3557,9 @@ def main():
         + "".join(f"{i+5}. **Mplus {label}**：`{p}`\n"
                   for i, (label, p) in enumerate(mplus_inp_paths))
         + f"\n> 建議執行順序：\n"
-          f"> 1. SPSS_Syntax 匯入資料 → 2. SPSS_Reliability 跑信度\n"
-          f"> 3. CFA_FiveFactor 跑量測模型 → 4. MI 測量恆等性\n"
-          f"> 5. RI-CLPM Step1 主路徑 → Step2 加 PP → Step3 加控制變數\n"
+          f"> 1. SPSS_Syntax 匯入資料 → 2. SPSS_Analysis 完整 SPSS 分析\n"
+          f"> 3. Mplus CFA_FiveFactor 量測模型 → 4. MI 測量恆等性\n"
+          f"> 5. Mplus RI-CLPM A/B（H1-H7）→ 6. RI-CLPM C1/C2/D1/D2（H8 子群）\n"
     )
     report_content = f"# 全階段資料分析自動化整合報告 (產生時間: {ts})\n\n" + attrition_md + desc_md + riclpm_info_md
 
@@ -3461,6 +3737,7 @@ def main():
     print(f"   - SPSS Full Data   : {csv_path}")
     print(f"   - Analysis Data    : {analysis_path}")
     print(f"   - SPSS 匯入語法    : {spss_sps_path}")
+    print(f"   - SPSS 完整分析    : {spss_analysis_path}")
     print(f"   - SPSS 信度語法    : {spss_rel_path}")
     print(f"   - Mplus CFA dat    : {cfa_dat_path}")
     for label, p in cfa_paths:
