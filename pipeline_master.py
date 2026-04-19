@@ -1065,43 +1065,74 @@ def generate_spss_syntax(csv_filename, ts):
 * ============================================================.
 
 * ---- 步驟 1：匯入 Analysis_Ready CSV ----.
+* 注意：每個變數必須緊接自己的格式碼（SPSS 規定）.
 GET DATA
   /TYPE = TXT
   /FILE = "{csv_filename}"
   /ENCODING = 'UTF8'
   /DELIMITERS = ","
   /QUALIFIER = '"'
+  /ARRANGEMENT = DELIMITED
   /FIRSTCASE = 2
   /VARIABLES =
-    Group       F1.0
-    HP1_T1 HP2_T1 HP3_T1 HP4_T1 HP5_T1 HP6_T1   F8.4
-    JCP1_T1 JCP2_T1 JCP3_T1 JCP4_T1 JCP5_T1 JCP6_T1  F8.4
-    PP1_T1 PP2_T1 PP3_T1 PP4_T1 PP5_T1 PP6_T1   F8.4
-    DP1_T1 DP2_T1 DP3_T1 DP4_T1 DP5_T1           F8.4
-    CI1_T1 CI2_T1 CI3_T1 CI4_T1 CI5_T1 CI6_T1 CI7_T1 CI8_T1  F8.4
-    Gender      F1.0
-    Age         F4.1
-    Education   F1.0
-    Marriage    F1.0
-    NowJobTenure F6.1
-    JobTenure    F6.1
-    Position    F1.0
-    Industry    F1.0
-    OrgSize     F1.0
-    PM_Has      F1.0
-    PM_Supervisor PM_Self PM_Interview PM_Other  F1.0
-    PM_Result   F1.0
-    PM_Help     F4.1
-    HP1_T2 HP2_T2 HP3_T2 HP4_T2 HP5_T2 HP6_T2   F8.4
-    JCP1_T2 JCP2_T2 JCP3_T2 JCP4_T2 JCP5_T2 JCP6_T2  F8.4
-    PP1_T2 PP2_T2 PP3_T2 PP4_T2 PP5_T2 PP6_T2   F8.4
-    DP1_T2 DP2_T2 DP3_T2 DP4_T2 DP5_T2           F8.4
-    CI1_T2 CI2_T2 CI3_T2 CI4_T2 CI5_T2 CI6_T2 CI7_T2 CI8_T2  F8.4
-    HP1_T3 HP2_T3 HP3_T3 HP4_T3 HP5_T3 HP6_T3   F8.4
-    JCP1_T3 JCP2_T3 JCP3_T3 JCP4_T3 JCP5_T3 JCP6_T3  F8.4
-    PP1_T3 PP2_T3 PP3_T3 PP4_T3 PP5_T3 PP6_T3   F8.4
-    DP1_T3 DP2_T3 DP3_T3 DP4_T3 DP5_T3           F8.4
-    CI1_T3 CI2_T3 CI3_T3 CI4_T3 CI5_T3 CI6_T3 CI7_T3 CI8_T3  F8.4.
+    Group        F2.0
+    HP1_T1  F8.4   HP2_T1  F8.4   HP3_T1  F8.4
+    HP4_T1  F8.4   HP5_T1  F8.4   HP6_T1  F8.4
+    JCP1_T1 F8.4   JCP2_T1 F8.4   JCP3_T1 F8.4
+    JCP4_T1 F8.4   JCP5_T1 F8.4   JCP6_T1 F8.4
+    PP1_T1  F8.4   PP2_T1  F8.4   PP3_T1  F8.4
+    PP4_T1  F8.4   PP5_T1  F8.4   PP6_T1  F8.4
+    DP1_T1  F8.4   DP2_T1  F8.4   DP3_T1  F8.4
+    DP4_T1  F8.4   DP5_T1  F8.4
+    CI1_T1  F8.4   CI2_T1  F8.4   CI3_T1  F8.4
+    CI4_T1  F8.4   CI5_T1  F8.4   CI6_T1  F8.4
+    CI7_T1  F8.4   CI8_T1  F8.4
+    Gender       F2.0
+    Age          F6.2
+    Education    F2.0
+    Marriage     F2.0
+    NowJobTenure F8.2
+    JobTenure    F8.2
+    Position     F2.0
+    Industry     F2.0
+    OrgSize      F2.0
+    PM_Has_T1      F2.0
+    PM_Supervisor_T1 F2.0   PM_Self_T1 F2.0
+    PM_Interview_T1  F2.0   PM_Other_T1 F2.0
+    PM_Result_T1   F2.0
+    PM_Help_T1     F6.2
+    HP1_T2  F8.4   HP2_T2  F8.4   HP3_T2  F8.4
+    HP4_T2  F8.4   HP5_T2  F8.4   HP6_T2  F8.4
+    JCP1_T2 F8.4   JCP2_T2 F8.4   JCP3_T2 F8.4
+    JCP4_T2 F8.4   JCP5_T2 F8.4   JCP6_T2 F8.4
+    PP1_T2  F8.4   PP2_T2  F8.4   PP3_T2  F8.4
+    PP4_T2  F8.4   PP5_T2  F8.4   PP6_T2  F8.4
+    DP1_T2  F8.4   DP2_T2  F8.4   DP3_T2  F8.4
+    DP4_T2  F8.4   DP5_T2  F8.4
+    CI1_T2  F8.4   CI2_T2  F8.4   CI3_T2  F8.4
+    CI4_T2  F8.4   CI5_T2  F8.4   CI6_T2  F8.4
+    CI7_T2  F8.4   CI8_T2  F8.4
+    PM_Has_T2      F2.0
+    PM_Supervisor_T2 F2.0   PM_Self_T2 F2.0
+    PM_Interview_T2  F2.0   PM_Other_T2 F2.0
+    PM_Result_T2   F2.0
+    PM_Help_T2     F6.2
+    HP1_T3  F8.4   HP2_T3  F8.4   HP3_T3  F8.4
+    HP4_T3  F8.4   HP5_T3  F8.4   HP6_T3  F8.4
+    JCP1_T3 F8.4   JCP2_T3 F8.4   JCP3_T3 F8.4
+    JCP4_T3 F8.4   JCP5_T3 F8.4   JCP6_T3 F8.4
+    PP1_T3  F8.4   PP2_T3  F8.4   PP3_T3  F8.4
+    PP4_T3  F8.4   PP5_T3  F8.4   PP6_T3  F8.4
+    DP1_T3  F8.4   DP2_T3  F8.4   DP3_T3  F8.4
+    DP4_T3  F8.4   DP5_T3  F8.4
+    CI1_T3  F8.4   CI2_T3  F8.4   CI3_T3  F8.4
+    CI4_T3  F8.4   CI5_T3  F8.4   CI6_T3  F8.4
+    CI7_T3  F8.4   CI8_T3  F8.4
+    PM_Has_T3      F2.0
+    PM_Supervisor_T3 F2.0   PM_Self_T3 F2.0
+    PM_Interview_T3  F2.0   PM_Other_T3 F2.0
+    PM_Result_T3   F2.0
+    PM_Help_T3     F6.2.
 CACHE.
 EXECUTE.
 
@@ -1139,6 +1170,68 @@ VARIABLE LABELS
   CI6_T1      'CI題6_T1：行動困難'
   CI7_T1      'CI題7_T1：職涯停滯感'
   CI8_T1      'CI題8_T1：無法實現職涯渴望'
+  HP1_T2      'HP題1_T2：晉升可能性有限'
+  HP2_T2      'HP題2_T2：職位達頂'
+  HP3_T2      'HP題3_T2：不太可能獲更高職位'
+  HP4_T2      'HP題4_T2(反)：預期近期可晉升'
+  HP5_T2      'HP題5_T2：向上晉升機會有限'
+  HP6_T2      'HP題6_T2(反)：預期晉升機會頻繁'
+  JCP1_T2     'JCP題1_T2(反)：工作有挑戰性'
+  JCP2_T2     'JCP題2_T2(反)：需拓展能力'
+  JCP3_T2     'JCP題3_T2(反)：學習成長機會多'
+  JCP4_T2     'JCP題4_T2(反)：工作經常有挑戰'
+  JCP5_T2     'JCP題5_T2(反)：職責明顯增加'
+  JCP6_T2     'JCP題6_T2：工作已成家常便飯'
+  PP1_T2      'PP題1_T2：改正看不順眼的事'
+  PP2_T2      'PP題2_T2：努力實現所信之事'
+  PP3_T2      'PP題3_T2：擁護自己的想法'
+  PP4_T2      'PP題4_T2：尋求更好做事方法'
+  PP5_T2      'PP題5_T2：落實所信的理念'
+  PP6_T2      'PP題6_T2：洞察先機'
+  DP1_T2      'DP題1_T2：決定前花時間處理瑣事'
+  DP2_T2      'DP題2_T2：決定後仍拖延行動'
+  DP3_T2      'DP題3_T2：等很久才思考決定'
+  DP4_T2      'DP題4_T2：拖延到為時已晚'
+  DP5_T2      'DP題5_T2：拖延做決定'
+  CI1_T2      'CI題1_T2：想改變職涯但未積極追求'
+  CI2_T2      'CI題2_T2：不知如何開始'
+  CI3_T2      'CI題3_T2：不敢放棄現有'
+  CI4_T2      'CI題4_T2：未採具體行動'
+  CI5_T2      'CI題5_T2：感到無法動彈'
+  CI6_T2      'CI題6_T2：行動困難'
+  CI7_T2      'CI題7_T2：職涯停滯感'
+  CI8_T2      'CI題8_T2：無法實現職涯渴望'
+  HP1_T3      'HP題1_T3：晉升可能性有限'
+  HP2_T3      'HP題2_T3：職位達頂'
+  HP3_T3      'HP題3_T3：不太可能獲更高職位'
+  HP4_T3      'HP題4_T3(反)：預期近期可晉升'
+  HP5_T3      'HP題5_T3：向上晉升機會有限'
+  HP6_T3      'HP題6_T3(反)：預期晉升機會頻繁'
+  JCP1_T3     'JCP題1_T3(反)：工作有挑戰性'
+  JCP2_T3     'JCP題2_T3(反)：需拓展能力'
+  JCP3_T3     'JCP題3_T3(反)：學習成長機會多'
+  JCP4_T3     'JCP題4_T3(反)：工作經常有挑戰'
+  JCP5_T3     'JCP題5_T3(反)：職責明顯增加'
+  JCP6_T3     'JCP題6_T3：工作已成家常便飯'
+  PP1_T3      'PP題1_T3：改正看不順眼的事'
+  PP2_T3      'PP題2_T3：努力實現所信之事'
+  PP3_T3      'PP題3_T3：擁護自己的想法'
+  PP4_T3      'PP題4_T3：尋求更好做事方法'
+  PP5_T3      'PP題5_T3：落實所信的理念'
+  PP6_T3      'PP題6_T3：洞察先機'
+  DP1_T3      'DP題1_T3：決定前花時間處理瑣事'
+  DP2_T3      'DP題2_T3：決定後仍拖延行動'
+  DP3_T3      'DP題3_T3：等很久才思考決定'
+  DP4_T3      'DP題4_T3：拖延到為時已晚'
+  DP5_T3      'DP題5_T3：拖延做決定'
+  CI1_T3      'CI題1_T3：想改變職涯但未積極追求'
+  CI2_T3      'CI題2_T3：不知如何開始'
+  CI3_T3      'CI題3_T3：不敢放棄現有'
+  CI4_T3      'CI題4_T3：未採具體行動'
+  CI5_T3      'CI題5_T3：感到無法動彈'
+  CI6_T3      'CI題6_T3：行動困難'
+  CI7_T3      'CI題7_T3：職涯停滯感'
+  CI8_T3      'CI題8_T3：無法實現職涯渴望'
   Gender      '性別'
   Age         '年齡（實歲）'
   Education   '教育程度'
@@ -1148,13 +1241,27 @@ VARIABLE LABELS
   Position    '工作職級'
   Industry    '產業別'
   OrgSize     '公司規模'
-  PM_Has      '是否有績效考核'
-  PM_Supervisor '考核形式：主管評核'
-  PM_Self     '考核形式：自我評核'
-  PM_Interview '考核形式：績效面談'
-  PM_Other    '考核形式：其他'
-  PM_Result   '考核結果性質'
-  PM_Help     '考核對職涯幫助程度（1-5）'.
+  PM_Has_T1      'T1 是否有績效考核'
+  PM_Supervisor_T1 'T1 考核形式：主管評核'
+  PM_Self_T1     'T1 考核形式：自我評核'
+  PM_Interview_T1 'T1 考核形式：績效面談'
+  PM_Other_T1    'T1 考核形式：其他'
+  PM_Result_T1   'T1 考核結果性質'
+  PM_Help_T1     'T1 考核對職涯幫助程度（1-5）'
+  PM_Has_T2      'T2 是否有績效考核'
+  PM_Supervisor_T2 'T2 考核形式：主管評核'
+  PM_Self_T2     'T2 考核形式：自我評核'
+  PM_Interview_T2 'T2 考核形式：績效面談'
+  PM_Other_T2    'T2 考核形式：其他'
+  PM_Result_T2   'T2 考核結果性質'
+  PM_Help_T2     'T2 考核對職涯幫助程度（1-5）'
+  PM_Has_T3      'T3 是否有績效考核'
+  PM_Supervisor_T3 'T3 考核形式：主管評核'
+  PM_Self_T3     'T3 考核形式：自我評核'
+  PM_Interview_T3 'T3 考核形式：績效面談'
+  PM_Other_T3    'T3 考核形式：其他'
+  PM_Result_T3   'T3 考核結果性質'
+  PM_Help_T3     'T3 考核對職涯幫助程度（1-5）'.
 
 * ---- 步驟 3：數值標籤（Value Labels）----.
 VALUE LABELS
@@ -1197,19 +1304,24 @@ VALUE LABELS
     3 '101-500人'
     4 '501-1000人'
     5 '1001人以上' /
-  PM_Has
+  PM_Has_T1 PM_Has_T2 PM_Has_T3
     0 '無績效考核'
     1 '有績效考核' /
-  PM_Supervisor PM_Self PM_Interview PM_Other
+  PM_Supervisor_T1 PM_Self_T1 PM_Interview_T1 PM_Other_T1
+  PM_Supervisor_T2 PM_Self_T2 PM_Interview_T2 PM_Other_T2
+  PM_Supervisor_T3 PM_Self_T3 PM_Interview_T3 PM_Other_T3
     0 '否'
     1 '是' /
-  PM_Result
+  PM_Result_T1 PM_Result_T2 PM_Result_T3
     1 '負向回饋'
     2 '中性/持平'
     3 '正向回饋'.
 
 * ---- 步驟 4：遺漏值設定 ----.
-MISSING VALUES ALL (SYSMIS).
+* 注意：SYSMIS（系統遺漏值）由 SPSS 自動處理，無需額外宣告。
+* 若問卷使用特定代碼代表遺漏（如 99、-9），可在此宣告，例如：
+* MISSING VALUES HP1_T1 TO CI8_T3 (99).
+* 本資料已於 Python 清理階段處理遺漏值，無需另行設定。
 
 * ---- 步驟 5：只保留三波完整樣本（Group=3）----.
 * SELECT IF (Group = 3).
@@ -1326,13 +1438,18 @@ OUTPUT:
 
 
 # ----------------------------------------------------------
-# Step 2：加入 PP（H8）
+# Step 2：加入 PP（H8：PP 隨機截距與 DP/CI 隨機截距的個體間關聯）
+# 修正說明：PP 為跨期穩定特質，within-person 變異接近 0，
+# 不適合當 within-person 交叉延遲的前因。正確做法：
+# (1) RI_PP WITH RI_DP/RI_CI（已由 _mplus_ri_clpm_core 自動產生）
+# (2) H8 調節效果採高/低 PP 分組模型（C1/C2/D1/D2）
 # ----------------------------------------------------------
 def generate_mplus_step2(dat_filename, ts):
     return f"""TITLE:
-  [Step2] RI-CLPM 加入 PP: CP -> DP -> CI, PP -> DP/CI
+  [Step2] RI-CLPM 加入 PP（PP 隨機截距共變）
   Generated: {ts}
-  H8: PP 負向預測後續 DP 與 CI
+  H8: PP 穩定水準（RI_PP）與 DP/CI 穩定水準的個體間關聯
+  注意：PP 為跨期穩定特質，使用 RI 共變而非 within-person 路徑
 
 DATA:
   FILE = "{dat_filename}";
@@ -1357,10 +1474,9 @@ MODEL:
   WDP2 ON WCP1 (cl_cp_dp);  WDP3 ON WCP2 (cl_cp_dp);
   ! 交叉延遲：DP -> CI [正向]
   WCI2 ON WDP1 (cl_dp_ci);  WCI3 ON WDP2 (cl_dp_ci);
-  ! H8: PP -> DP [負向]
-  WDP2 ON WPP1 (cl_pp_dp);  WDP3 ON WPP2 (cl_pp_dp);
-  ! H8: PP -> CI [負向]
-  WCI2 ON WPP1 (cl_pp_ci);  WCI3 ON WPP2 (cl_pp_ci);
+  ! H8（between-person）：RI_PP 與 RI_DP/RI_CI 隨機截距共變
+  ! 已在 _mplus_ri_clpm_core 產出的 RI WITH 區段中包含
+  ! 可從 OUTPUT STDYX 的 Correlations Among Latent Variables 讀取
 
 OUTPUT:
   SAMPSTAT;  STDYX;  MODINDICES(10);  CINTERVAL;
@@ -1374,7 +1490,8 @@ def generate_mplus_step3(dat_filename, ts):
     return f"""TITLE:
   [Step3] RI-CLPM 完整版: CP/PP/DP/CI + 控制變數
   Generated: {ts}
-  控制變數: Gender, Age, Tenure, Position (T1 時間點)
+  控制變數回歸至隨機截距：Gender, Age, Tenure, Position
+  H8 調節效果見分組模型（C1/C2 JCP 組、D1/D2 HP 組）
 
 DATA:
   FILE = "{dat_filename}";
@@ -1400,9 +1517,8 @@ MODEL:
   WDP2 ON WCP1 (cl_cp_dp);  WDP3 ON WCP2 (cl_cp_dp);
   ! 交叉延遲：DP -> CI
   WCI2 ON WDP1 (cl_dp_ci);  WCI3 ON WDP2 (cl_dp_ci);
-  ! H8: PP -> DP/CI
-  WDP2 ON WPP1 (cl_pp_dp);  WDP3 ON WPP2 (cl_pp_dp);
-  WCI2 ON WPP1 (cl_pp_ci);  WCI3 ON WPP2 (cl_pp_ci);
+  ! H8（between-person）：RI_PP 與 RI_DP/RI_CI 隨機截距共變
+  ! 已在 _mplus_ri_clpm_core 產出的 RI WITH 區段中包含
 
   ! 控制變數 -> 隨機截距（排除個體間差異）
   RI_CP ON Gender Age Tenure Position;
@@ -1502,7 +1618,7 @@ RELIABILITY
 """
 
 
-def generate_spss_analysis_syntax(analysis_path, ts, pp_median=3.5, n_total=340):
+def generate_spss_analysis_syntax(analysis_path, ts, pp_median=3.5, n_total=340, exclude=None):
     """
     產出完整 SPSS 分析語法：
       步驟 0：篩選三波完整樣本 (Group=3)
@@ -1513,10 +1629,27 @@ def generate_spss_analysis_syntax(analysis_path, ts, pp_median=3.5, n_total=340)
       步驟 5：Pearson 相關矩陣（T1 合成分數）
       步驟 6：Harman 共同方法偏差單因子檢定（CMV）
       步驟 7：常態性檢定（EXAMINE）
+    exclude: list of item names to omit from composites and reliability (e.g. ['JCP6', 'DP1'])
     """
+    excl = set(exclude or [])
+
+    def _m(prefix, total, wave):
+        items = [f'{prefix}{i}_{wave}' for i in range(1, total+1) if f'{prefix}{i}' not in excl]
+        return f"MEAN({', '.join(items)})"
+
+    def _r(prefix, total, wave):
+        items = [f'{prefix}{i}_{wave}' for i in range(1, total+1) if f'{prefix}{i}' not in excl]
+        return ' '.join(items)
+
+    jcp_m1=_m('JCP',6,'T1'); jcp_m2=_m('JCP',6,'T2'); jcp_m3=_m('JCP',6,'T3')
+    dp_m1 =_m('DP', 5,'T1'); dp_m2 =_m('DP', 5,'T2'); dp_m3 =_m('DP', 5,'T3')
+    jcp_r1=_r('JCP',6,'T1'); jcp_r2=_r('JCP',6,'T2'); jcp_r3=_r('JCP',6,'T3')
+    dp_r1 =_r('DP', 5,'T1'); dp_r2 =_r('DP', 5,'T2'); dp_r3 =_r('DP', 5,'T3')
+    excl_note = f'（排除題目：{", ".join(sorted(excl))}）' if excl else ''
+
     return f"""\
 * ============================================================.
-* 完整 SPSS 分析語法 — 自動產生 {ts}.
+* 完整 SPSS 分析語法 — 自動產生 {ts}{excl_note}.
 * 執行前請先開啟並執行 SPSS_Syntax_{ts}.sps（匯入資料）.
 * 資料來源：{analysis_path}.
 * N（三波完整）= {n_total}.
@@ -1536,9 +1669,9 @@ EXECUTE.
 
 * --- T1 合成分數 ---.
 COMPUTE HP_T1  = MEAN(HP1_T1,  HP2_T1,  HP3_T1,  HP4_T1,  HP5_T1,  HP6_T1).
-COMPUTE JCP_T1 = MEAN(JCP1_T1, JCP2_T1, JCP3_T1, JCP4_T1, JCP5_T1, JCP6_T1).
+COMPUTE JCP_T1 = {jcp_m1}.
 COMPUTE PP_T1  = MEAN(PP1_T1,  PP2_T1,  PP3_T1,  PP4_T1,  PP5_T1,  PP6_T1).
-COMPUTE DP_T1  = MEAN(DP1_T1,  DP2_T1,  DP3_T1,  DP4_T1,  DP5_T1).
+COMPUTE DP_T1  = {dp_m1}.
 COMPUTE CI_T1  = MEAN(CI1_T1,  CI2_T1,  CI3_T1,  CI4_T1,  CI5_T1,
                        CI6_T1,  CI7_T1,  CI8_T1).
 VARIABLE LABELS
@@ -1550,9 +1683,9 @@ VARIABLE LABELS
 
 * --- T2 合成分數 ---.
 COMPUTE HP_T2  = MEAN(HP1_T2,  HP2_T2,  HP3_T2,  HP4_T2,  HP5_T2,  HP6_T2).
-COMPUTE JCP_T2 = MEAN(JCP1_T2, JCP2_T2, JCP3_T2, JCP4_T2, JCP5_T2, JCP6_T2).
+COMPUTE JCP_T2 = {jcp_m2}.
 COMPUTE PP_T2  = MEAN(PP1_T2,  PP2_T2,  PP3_T2,  PP4_T2,  PP5_T2,  PP6_T2).
-COMPUTE DP_T2  = MEAN(DP1_T2,  DP2_T2,  DP3_T2,  DP4_T2,  DP5_T2).
+COMPUTE DP_T2  = {dp_m2}.
 COMPUTE CI_T2  = MEAN(CI1_T2,  CI2_T2,  CI3_T2,  CI4_T2,  CI5_T2,
                        CI6_T2,  CI7_T2,  CI8_T2).
 VARIABLE LABELS
@@ -1564,9 +1697,9 @@ VARIABLE LABELS
 
 * --- T3 合成分數 ---.
 COMPUTE HP_T3  = MEAN(HP1_T3,  HP2_T3,  HP3_T3,  HP4_T3,  HP5_T3,  HP6_T3).
-COMPUTE JCP_T3 = MEAN(JCP1_T3, JCP2_T3, JCP3_T3, JCP4_T3, JCP5_T3, JCP6_T3).
+COMPUTE JCP_T3 = {jcp_m3}.
 COMPUTE PP_T3  = MEAN(PP1_T3,  PP2_T3,  PP3_T3,  PP4_T3,  PP5_T3,  PP6_T3).
-COMPUTE DP_T3  = MEAN(DP1_T3,  DP2_T3,  DP3_T3,  DP4_T3,  DP5_T3).
+COMPUTE DP_T3  = {dp_m3}.
 COMPUTE CI_T3  = MEAN(CI1_T3,  CI2_T3,  CI3_T3,  CI4_T3,  CI5_T3,
                        CI6_T3,  CI7_T3,  CI8_T3).
 VARIABLE LABELS
@@ -1605,8 +1738,10 @@ FREQUENCIES VARIABLES = Gender Education Marriage Position Industry OrgSize
 DESCRIPTIVES VARIABLES = Age NowJobTenure JobTenure
   /STATISTICS = MEAN STDDEV MIN MAX.
 
-* 績效考核現況.
-FREQUENCIES VARIABLES = PM_Has PM_Result PM_Help.
+* 績效考核現況（三波次）.
+FREQUENCIES VARIABLES = PM_Has_T1 PM_Result_T1 PM_Help_T1
+                        PM_Has_T2 PM_Result_T2 PM_Help_T2
+                        PM_Has_T3 PM_Result_T3 PM_Help_T3.
 
 
 * ============================================================.
@@ -1676,76 +1811,97 @@ EXAMINE VARIABLES = HP_T1 JCP_T1 PP_T1 DP_T1 CI_T1
 
 
 * ============================================================.
-* 步驟 8：信度分析（CITC + Alpha-if-Deleted）.
-* 關鍵輸出：「Item-Total Statistics」表格.
-*   - Corrected Item-Total Correlation（CITC）< .30 → 考慮刪題.
-*   - Cronbach's Alpha if Item Deleted > 整體 α → 考慮刪題.
+* 步驟 8：信度分析（CITC + Alpha-if-Deleted + 題目間相關矩陣）.
+* 關鍵輸出：.
+*   Item-Total Statistics：CITC（< .30 考慮刪題）、Alpha-if-Deleted（> 整體α 考慮刪題）.
+*   Inter-Item Correlation Matrix：題目間相關矩陣.
+*   Item Statistics：各題平均數與標準差.
+*   Summary Item Statistics：各題平均數與變異數摘要.
 * ============================================================.
+
 * --- HP 階層停滯（T1）---.
 RELIABILITY
   /VARIABLES = HP1_T1 HP2_T1 HP3_T1 HP4_T1 HP5_T1 HP6_T1
   /SCALE('HP 階層停滯 T1') ALL
   /MODEL = ALPHA
-  /STATISTICS = DESCRIPTIVE SCALE
-  /SUMMARY = TOTAL.
-* 以上輸出中：「Corrected Item-Total Correlation」欄即為 CITC.
-* 「Cronbach's Alpha if Item Deleted」欄為刪題後 Alpha.
+  /STATISTICS = DESCRIPTIVE SCALE CORR
+  /SUMMARY = TOTAL MEANS VARIANCE.
 
 * --- JCP 工作內容停滯（T1）---.
 RELIABILITY
-  /VARIABLES = JCP1_T1 JCP2_T1 JCP3_T1 JCP4_T1 JCP5_T1 JCP6_T1
+  /VARIABLES = {jcp_r1}
   /SCALE('JCP 工作內容停滯 T1') ALL
   /MODEL = ALPHA
-  /STATISTICS = DESCRIPTIVE SCALE
-  /SUMMARY = TOTAL.
+  /STATISTICS = DESCRIPTIVE SCALE CORR
+  /SUMMARY = TOTAL MEANS VARIANCE.
 
 * --- PP 主動型人格（T1）---.
 RELIABILITY
   /VARIABLES = PP1_T1 PP2_T1 PP3_T1 PP4_T1 PP5_T1 PP6_T1
   /SCALE('PP 主動型人格 T1') ALL
   /MODEL = ALPHA
-  /STATISTICS = DESCRIPTIVE SCALE
-  /SUMMARY = TOTAL.
+  /STATISTICS = DESCRIPTIVE SCALE CORR
+  /SUMMARY = TOTAL MEANS VARIANCE.
 
 * --- DP 決策拖延（T1）---.
 RELIABILITY
-  /VARIABLES = DP1_T1 DP2_T1 DP3_T1 DP4_T1 DP5_T1
+  /VARIABLES = {dp_r1}
   /SCALE('DP 決策拖延 T1') ALL
   /MODEL = ALPHA
-  /STATISTICS = DESCRIPTIVE SCALE
-  /SUMMARY = TOTAL.
+  /STATISTICS = DESCRIPTIVE SCALE CORR
+  /SUMMARY = TOTAL MEANS VARIANCE.
 
 * --- CI 職涯無所作為（T1）---.
 RELIABILITY
   /VARIABLES = CI1_T1 CI2_T1 CI3_T1 CI4_T1 CI5_T1 CI6_T1 CI7_T1 CI8_T1
   /SCALE('CI 職涯無所作為 T1') ALL
   /MODEL = ALPHA
-  /STATISTICS = DESCRIPTIVE SCALE
-  /SUMMARY = TOTAL.
+  /STATISTICS = DESCRIPTIVE SCALE CORR
+  /SUMMARY = TOTAL MEANS VARIANCE.
 
 * --- T2 信度 ---.
-RELIABILITY /VARIABLES = HP1_T2 HP2_T2 HP3_T2 HP4_T2 HP5_T2 HP6_T2
-  /SCALE('HP T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
-RELIABILITY /VARIABLES = JCP1_T2 JCP2_T2 JCP3_T2 JCP4_T2 JCP5_T2 JCP6_T2
-  /SCALE('JCP T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
-RELIABILITY /VARIABLES = PP1_T2 PP2_T2 PP3_T2 PP4_T2 PP5_T2 PP6_T2
-  /SCALE('PP T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
-RELIABILITY /VARIABLES = DP1_T2 DP2_T2 DP3_T2 DP4_T2 DP5_T2
-  /SCALE('DP T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
-RELIABILITY /VARIABLES = CI1_T2 CI2_T2 CI3_T2 CI4_T2 CI5_T2 CI6_T2 CI7_T2 CI8_T2
-  /SCALE('CI T2') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY
+  /VARIABLES = HP1_T2 HP2_T2 HP3_T2 HP4_T2 HP5_T2 HP6_T2
+  /SCALE('HP 階層停滯 T2') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
+RELIABILITY
+  /VARIABLES = {jcp_r2}
+  /SCALE('JCP 工作內容停滯 T2') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
+RELIABILITY
+  /VARIABLES = PP1_T2 PP2_T2 PP3_T2 PP4_T2 PP5_T2 PP6_T2
+  /SCALE('PP 主動型人格 T2') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
+RELIABILITY
+  /VARIABLES = {dp_r2}
+  /SCALE('DP 決策拖延 T2') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
+RELIABILITY
+  /VARIABLES = CI1_T2 CI2_T2 CI3_T2 CI4_T2 CI5_T2 CI6_T2 CI7_T2 CI8_T2
+  /SCALE('CI 職涯無所作為 T2') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
 
 * --- T3 信度 ---.
-RELIABILITY /VARIABLES = HP1_T3 HP2_T3 HP3_T3 HP4_T3 HP5_T3 HP6_T3
-  /SCALE('HP T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
-RELIABILITY /VARIABLES = JCP1_T3 JCP2_T3 JCP3_T3 JCP4_T3 JCP5_T3 JCP6_T3
-  /SCALE('JCP T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
-RELIABILITY /VARIABLES = PP1_T3 PP2_T3 PP3_T3 PP4_T3 PP5_T3 PP6_T3
-  /SCALE('PP T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
-RELIABILITY /VARIABLES = DP1_T3 DP2_T3 DP3_T3 DP4_T3 DP5_T3
-  /SCALE('DP T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
-RELIABILITY /VARIABLES = CI1_T3 CI2_T3 CI3_T3 CI4_T3 CI5_T3 CI6_T3 CI7_T3 CI8_T3
-  /SCALE('CI T3') ALL /MODEL = ALPHA /SUMMARY = TOTAL.
+RELIABILITY
+  /VARIABLES = HP1_T3 HP2_T3 HP3_T3 HP4_T3 HP5_T3 HP6_T3
+  /SCALE('HP 階層停滯 T3') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
+RELIABILITY
+  /VARIABLES = {jcp_r3}
+  /SCALE('JCP 工作內容停滯 T3') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
+RELIABILITY
+  /VARIABLES = PP1_T3 PP2_T3 PP3_T3 PP4_T3 PP5_T3 PP6_T3
+  /SCALE('PP 主動型人格 T3') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
+RELIABILITY
+  /VARIABLES = {dp_r3}
+  /SCALE('DP 決策拖延 T3') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
+RELIABILITY
+  /VARIABLES = CI1_T3 CI2_T3 CI3_T3 CI4_T3 CI5_T3 CI6_T3 CI7_T3 CI8_T3
+  /SCALE('CI 職涯無所作為 T3') ALL /MODEL = ALPHA
+  /STATISTICS = DESCRIPTIVE SCALE CORR /SUMMARY = TOTAL MEANS VARIANCE.
 
 
 * ============================================================.
@@ -1770,8 +1926,11 @@ T-TEST GROUPS = PP_group(0 1)
 # ==========================================
 # CFA 用 dat 檔（原始題目，T1）
 # ==========================================
-def generate_cfa_dat(df, output_dir, ts):
-    """匯出 T1 原始題目供五因子 CFA 使用（31 欄，無標題，空白分隔）"""
+def generate_cfa_dat(df, output_dir, ts, exclude=None):
+    """匯出 T1 原始題目供五因子 CFA 使用（無標題，空白分隔）。
+    exclude: list of item names to drop, e.g. ['JCP6', 'DP1']
+    """
+    excl = set(exclude or [])
     cfa_cols = (
         [f'HP{i+1}_T1'  for i in range(6)] +
         [f'JCP{i+1}_T1' for i in range(6)] +
@@ -1779,9 +1938,12 @@ def generate_cfa_dat(df, output_dir, ts):
         [f'DP{i+1}_T1'  for i in range(5)] +
         [f'CI{i+1}_T1'  for i in range(8)]
     )
-    cfa_cols = [c for c in cfa_cols if c in df.columns]
+    # 排除指定題目（如 JCP6_T1）並過濾不存在的欄位
+    cfa_cols = [c for c in cfa_cols
+                if c.rsplit('_', 1)[0] not in excl and c in df.columns]
     cfa_df = df[cfa_cols].fillna(-999)
-    dat_filename = f"CFA_Data_T1_{ts}.dat"
+    tag = ('_excl' + '_'.join(sorted(excl))) if excl else ''
+    dat_filename = f"CFA_Data_T1{tag}_{ts}.dat"
     dat_path = os.path.join(output_dir, dat_filename)
     cfa_df.to_csv(dat_path, sep=' ', index=False, header=False, float_format='%.4f')
     return dat_path, dat_filename
@@ -1794,7 +1956,7 @@ def generate_mplus_cfa_five_factor(dat_filename, ts):
     return f"""\
 TITLE:
   五因子 CFA — HP / JCP / PP / DP / CI（T1）
-  N = 277 / 產生時間 {ts}
+  Generated: {ts}
 
 DATA:
   FILE = "{dat_filename}";
@@ -1840,7 +2002,7 @@ TITLE:
   三因子 CFA（主路徑構念）— CP / DP / CI（T1）
   CP = HP1~HP6 + JCP1~JCP6 共 12 題視為單一構念
   不含 PP（主動型人格）
-  N = 277 / 產生時間 {ts}
+  Generated: {ts}
   【用途】驗證主路徑三構念之區別效度，與四因子/五因子比較
 
 DATA:
@@ -1884,7 +2046,7 @@ def generate_mplus_cfa_four_factor(dat_filename, ts):
 TITLE:
   四因子 CFA（對照模型）— CP合併 / PP / DP / CI（T1）
   CP = HP1~HP6 + JCP1~JCP6 共 12 題視為單一構念
-  N = 277 / 產生時間 {ts}
+  Generated: {ts}
   【用途】與五因子模型比較 CFI/RMSEA，驗證 HP/JCP 是否需要分開
 
 DATA:
@@ -1919,9 +2081,203 @@ OUTPUT:
 """
 
 
+def generate_mi_inp_files(df, run_dir, ts):
+    """
+    產出測量不變性（MI）所需資料與 .inp 語法（Model A/B × Step 1/2/3，共 8 檔）。
+    Model A：JCP（6題）+ DP（5題）+ CI（8題），三波 = 57 個欄位
+    Model B：HP（6題）+ DP（5題）+ CI（8題），三波 = 57 個欄位
+    """
+
+    def _mi_dat(df, prefixes_n, run_dir, ts, tag):
+        """寫出 MI 用 dat 檔，回傳 (dat_path, dat_filename)"""
+        cols_ordered = []
+        for wave in ['T1', 'T2', 'T3']:
+            for prefix, n in prefixes_n:
+                for i in range(1, n + 1):
+                    cols_ordered.append(f'{prefix}{i}_{wave}')
+        valid_cols = [c for c in cols_ordered if c in df.columns]
+        mi_df = df[valid_cols].apply(pd.to_numeric, errors='coerce').fillna(-999)
+        dat_fn = f"MI_{tag}_Data_{ts}.dat"
+        dat_path = os.path.join(run_dir, dat_fn)
+        mi_df.to_csv(dat_path, sep=' ', index=False, header=False, float_format='%.4f')
+        return dat_path, dat_fn
+
+    def _var_block(prefixes_n, wave_suffix=''):
+        """Generate NAMES / USEVARIABLES lines for a wave or all waves."""
+        lines = []
+        for wave in ['T1', 'T2', 'T3']:
+            for prefix, n in prefixes_n:
+                items = ' '.join(f'{prefix}{i}{wave_suffix}{wave}' for i in range(1, n + 1))
+                lines.append(f'    {items}')
+        return '\n'.join(lines)
+
+    def _configural(dat_fn, prefixes_n, tag):
+        var_names = []
+        for wave in ['T1', 'T2', 'T3']:
+            for prefix, n in prefixes_n:
+                var_names += [f'{prefix}{i}_{wave}' for i in range(1, n + 1)]
+        names_str = '\n    '.join(
+            ' '.join(var_names[i:i+10]) for i in range(0, len(var_names), 10))
+        model_lines = []
+        for wi, wave in enumerate(['T1', 'T2', 'T3'], 1):
+            for prefix, n in prefixes_n:
+                items = ' '.join(f'{prefix}{i}_{wave}' for i in range(1, n + 1))
+                factor = f'F_{prefix}{wi}'
+                model_lines.append(f'  {factor} BY {items}* ({prefix.lower()}_l{wi}_1);')
+                model_lines.append(f'  {factor}@1;')
+            model_lines.append('')
+        return f"""\
+TITLE:
+  測量不變性 — 形態模型（Configural）
+  Model {tag}，三波縱貫
+  Generated: {ts}
+
+DATA:
+  FILE = "{dat_fn}";
+
+VARIABLE:
+  NAMES =
+    {names_str};
+  USEVARIABLES = ALL;
+  MISSING = ALL(-999);
+
+ANALYSIS:
+  ESTIMATOR = MLR;
+  ITERATIONS = 10000;
+
+MODEL:
+{''.join(l + chr(10) for l in model_lines)}
+OUTPUT:
+  STDYX;
+  MODINDICES(10);
+  CINTERVAL;
+"""
+
+    def _metric(dat_fn, prefixes_n, tag):
+        var_names = []
+        for wave in ['T1', 'T2', 'T3']:
+            for prefix, n in prefixes_n:
+                var_names += [f'{prefix}{i}_{wave}' for i in range(1, n + 1)]
+        names_str = '\n    '.join(
+            ' '.join(var_names[i:i+10]) for i in range(0, len(var_names), 10))
+        model_lines = []
+        for prefix, n in prefixes_n:
+            for wi, wave in enumerate(['T1', 'T2', 'T3'], 1):
+                items_constraints = ' '.join(
+                    f'{prefix}{i}_{wave} ({prefix.lower()}_l{i})' for i in range(1, n + 1))
+                factor = f'F_{prefix}{wi}'
+                # First item gets * to free estimate, rest constrained equal across waves
+                items_first = f'{prefix}1_{wave}* ({prefix.lower()}_l1)'
+                items_rest  = ' '.join(
+                    f'{prefix}{i}_{wave} ({prefix.lower()}_l{i})' for i in range(2, n + 1))
+                model_lines.append(f'  F_{prefix}{wi} BY {items_first} {items_rest};')
+                model_lines.append(f'  F_{prefix}{wi}@1;')
+            model_lines.append('')
+        return f"""\
+TITLE:
+  測量不變性 — 因子負荷等同模型（Metric）
+  Model {tag}，三波縱貫
+  Generated: {ts}
+
+DATA:
+  FILE = "{dat_fn}";
+
+VARIABLE:
+  NAMES =
+    {names_str};
+  USEVARIABLES = ALL;
+  MISSING = ALL(-999);
+
+ANALYSIS:
+  ESTIMATOR = MLR;
+  ITERATIONS = 10000;
+
+MODEL:
+{''.join(l + chr(10) for l in model_lines)}
+OUTPUT:
+  STDYX;
+  MODINDICES(10);
+  CINTERVAL;
+"""
+
+    def _scalar(dat_fn, prefixes_n, tag):
+        var_names = []
+        for wave in ['T1', 'T2', 'T3']:
+            for prefix, n in prefixes_n:
+                var_names += [f'{prefix}{i}_{wave}' for i in range(1, n + 1)]
+        names_str = '\n    '.join(
+            ' '.join(var_names[i:i+10]) for i in range(0, len(var_names), 10))
+        model_lines = []
+        for prefix, n in prefixes_n:
+            for wi, wave in enumerate(['T1', 'T2', 'T3'], 1):
+                items_first = f'{prefix}1_{wave}* ({prefix.lower()}_l1)'
+                items_rest  = ' '.join(
+                    f'{prefix}{i}_{wave} ({prefix.lower()}_l{i})' for i in range(2, n + 1))
+                model_lines.append(f'  F_{prefix}{wi} BY {items_first} {items_rest};')
+                model_lines.append(f'  F_{prefix}{wi}@1;')
+            # intercept constraints across waves
+            for i in range(1, n + 1):
+                intercepts = ' '.join(
+                    f'[{prefix}{i}_{wave}]' for wave in ['T1', 'T2', 'T3'])
+                model_lines.append(f'  {intercepts} ({prefix.lower()}_int{i});')
+            model_lines.append('')
+        return f"""\
+TITLE:
+  測量不變性 — 截距等同模型（Scalar）
+  Model {tag}，三波縱貫
+  Generated: {ts}
+
+DATA:
+  FILE = "{dat_fn}";
+
+VARIABLE:
+  NAMES =
+    {names_str};
+  USEVARIABLES = ALL;
+  MISSING = ALL(-999);
+
+ANALYSIS:
+  ESTIMATOR = MLR;
+  ITERATIONS = 10000;
+
+MODEL:
+{''.join(l + chr(10) for l in model_lines)}
+OUTPUT:
+  STDYX;
+  MODINDICES(10);
+  CINTERVAL;
+"""
+
+    # Model A: JCP + DP + CI
+    a_prefixes = [('JCP', 6), ('DP', 5), ('CI', 8)]
+    _, a_dat_fn = _mi_dat(df, a_prefixes, run_dir, ts, 'A_JCP_DP_CI')
+
+    # Model B: HP + DP + CI
+    b_prefixes = [('HP', 6), ('DP', 5), ('CI', 8)]
+    _, b_dat_fn = _mi_dat(df, b_prefixes, run_dir, ts, 'B_HP_DP_CI')
+
+    files_generated = []
+    for tag, dat_fn, prefixes in [('A_JCP_DP_CI', a_dat_fn, a_prefixes),
+                                   ('B_HP_DP_CI',  b_dat_fn, b_prefixes)]:
+        for step_label, gen_fn in [
+            ('Step1_Configural', _configural),
+            ('Step2_Metric',     _metric),
+            ('Step3_Scalar',     _scalar),
+        ]:
+            content = gen_fn(dat_fn, prefixes, tag)
+            fname   = f"MI_{tag}_{step_label}_{ts}.inp"
+            fpath   = os.path.join(run_dir, fname)
+            with open(fpath, 'w', encoding='utf-8') as fh:
+                fh.write(content)
+            files_generated.append(fname)
+
+    print(f"  [MI] 已產出 {len(files_generated)} 個測量不變性 .inp 檔：{', '.join(files_generated)}")
+    return files_generated
+
+
 def generate_mplus_measurement_invariance(dat_filename_ri, ts):
     """
-    使用 parcel 合成分數（HP, JCP, PP, DP, CI）跨三波測量恆等性
+    使用 parcel 合成分數（HP, JCP, PP, DP, CI）跨三波測量恆等性（保留供參考）
     """
     return f"""\
 TITLE:
@@ -2004,13 +2360,17 @@ OUTPUT:
 """
 
 
-def generate_mplus_dat(df, output_dir, ts):
+def generate_mplus_dat(df, output_dir, ts, exclude=None):
     """
     從個別題目欄位計算 parcel 平均，產出 Mplus 用的 .dat 檔
     HP_T1 = mean(HP1_T1..HP6_T1), JCP_T1 = mean(JCP1_T1..JCP6_T1), etc.
+    exclude: list of item names to skip when computing parcel means, e.g. ['JCP6', 'DP1']
     """
+    excl = set(exclude or [])
+
     def pmean(data, prefix, n, wave):
-        cols = [f'{prefix}{i+1}_{wave}' for i in range(n)]
+        cols = [f'{prefix}{i+1}_{wave}' for i in range(n)
+                if f'{prefix}{i+1}' not in excl]
         cols = [c for c in cols if c in data.columns]
         return data[cols].mean(axis=1) if cols else pd.Series([-999]*len(data), index=data.index)
 
@@ -2030,13 +2390,14 @@ def generate_mplus_dat(df, output_dir, ts):
     # PP 中位數切割：PP_group = 0(低PP) / 1(高PP)，依 T1 PP 分數
     pp_median = mplus_df['PP_T1'].replace(-999, np.nan).median()
     mplus_df['PP_group'] = mplus_df['PP_T1'].apply(
-        lambda x: -999 if x == -999 else (1 if x >= pp_median else 0))
+        lambda x: -999 if x == -999 else (1 if x > pp_median else 0))
     print(f"[PP分群] T1 PP 中位數 = {pp_median:.3f}  "
           f"低PP組(0): {(mplus_df['PP_group']==0).sum()}人  "
           f"高PP組(1): {(mplus_df['PP_group']==1).sum()}人")
 
     mplus_df = mplus_df.fillna(-999)
-    dat_filename = f"Mplus_Data_{ts}.dat"
+    tag = ('_excl' + '_'.join(sorted(excl))) if excl else ''
+    dat_filename = f"Mplus_Data{tag}_{ts}.dat"
     dat_path = os.path.join(output_dir, dat_filename)
     mplus_df.to_csv(dat_path, sep=' ', index=False, header=False,
                     float_format='%.4f')
@@ -2419,62 +2780,191 @@ def parse_mplus_indirect(out_path, indirect_specs):
     return results
 
 
+def parse_mplus_cfa_loadings(out_path):
+    """
+    從 Mplus .out 的 STDYX Standardization 區段擷取 CFA 因素負荷量。
+
+    回傳：
+        list of dict，每筆含：
+            factor (str)   — 因子名稱，如 'HP'
+            item   (str)   — 題目名稱，如 'HP1'
+            beta   (float) — STDYX 標準化負荷量
+            se     (float) — 標準誤
+            z      (float) — z 值
+            p      (float) — p 值
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return []
+    try:
+        with open(out_path, 'r', encoding='utf-8', errors='replace') as f:
+            text = f.read()
+    except Exception:
+        return []
+
+    # 找第一個 STDYX Standardization 區段（BY 語句）
+    m = re.search(
+        r'STDYX Standardization\s+'
+        r'Two-Tailed\s+Estimate\s+S\.E\.\s+Est\./S\.E\.\s+P-Value\s+(.*?)'
+        r'(?=\nSTDYX Standardization|\nCONFIDENCE INTERVALS|\nTECHNICAL|\Z)',
+        text, re.DOTALL
+    )
+    if not m:
+        return []
+
+    block = m.group(1)
+    rows = []
+    current_factor = None
+
+    for line in block.splitlines():
+        # WITH 行出現代表 BY 區段已結束，停止解析
+        if re.match(r'^\s*\w+\s+WITH\s*$', line):
+            break
+        # 因子行：" HP       BY" 或 "HP       BY"（第一行可能無前導空白）
+        factor_m = re.match(r'^\s*(\w+)\s+BY\s*$', line)
+        if factor_m:
+            current_factor = factor_m.group(1)
+            continue
+        # 題目行：" HP1  0.710  0.041  17.383  0.000"
+        if current_factor:
+            item_m = re.match(
+                r'^\s+(\w+)\s+([-\d.]+)\s+([\d.]+)\s+([-\d.]+)\s+([\d.]+)\s*$',
+                line
+            )
+            if item_m:
+                rows.append({
+                    'factor': current_factor,
+                    'item':   item_m.group(1),
+                    'beta':   float(item_m.group(2)),
+                    'se':     float(item_m.group(3)),
+                    'z':      float(item_m.group(4)),
+                    'p':      float(item_m.group(5)),
+                })
+    return rows
+
+
 # ==========================================
 # MODULE E: 整合執行所有 Mplus 模型並收集結果
 # ==========================================
 def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
-                              mplus_exe=None):
+                              mplus_exe=None, exclude=None):
     """
-    生成 8 個新 CFA/RI-CLPM .inp → 自動執行 → 解析結果
+    生成 CFA/RI-CLPM .inp → 自動執行 → 解析結果
+    exclude: list of item names to remove from CFA (e.g. ['JCP6', 'DP1'])
     回傳 all_results dict 供 Excel/Word/PPT 使用
     """
+    excl = set(exclude or [])
     all_results = {}
 
-    # ---- CFA 模型 A-D ----
-    # vars_lines: 每個因子的題目分行（Mplus 每行 <90 字元限制）
-    _v_jcp = '    JCP1 JCP2 JCP3 JCP4 JCP5 JCP6'
-    _v_hp  = '    HP1  HP2  HP3  HP4  HP5  HP6'
-    _v_pp  = '    PP1  PP2  PP3  PP4  PP5  PP6'
-    _v_dp  = '    DP1  DP2  DP3  DP4  DP5'
-    _v_ci  = '    CI1  CI2  CI3  CI4  CI5  CI6  CI7  CI8'
+    # ---- 動態建立各因子題目清單 ----
+    def _items(prefix, total):
+        return [f'{prefix}{i}' for i in range(1, total + 1) if f'{prefix}{i}' not in excl]
 
+    jcp_items = _items('JCP', 6)
+    hp_items  = _items('HP',  6)
+    pp_items  = _items('PP',  6)
+    dp_items  = _items('DP',  5)
+    ci_items  = _items('CI',  8)
+
+    def _vline(items):
+        return '    ' + '  '.join(items)
+
+    def _by_line(factor, items):
+        if not items:
+            return ''
+        parts = [items[0] + '*'] + items[1:]
+        return f'  {factor} BY {" ".join(parts)};  {factor}@1;\n'
+
+    _v_jcp = _vline(jcp_items)
+    _v_hp  = _vline(hp_items)
+    _v_pp  = _vline(pp_items)
+    _v_dp  = _vline(dp_items)
+    _v_ci  = _vline(ci_items)
+
+    # NAMES 區塊只列 CFA dat 實際包含的題目（排除後）
+    all_items_ordered = (
+        [f'HP{i}'  for i in range(1, 7)  if f'HP{i}'  not in excl] +
+        [f'JCP{i}' for i in range(1, 7)  if f'JCP{i}' not in excl] +
+        [f'PP{i}'  for i in range(1, 7)  if f'PP{i}'  not in excl] +
+        [f'DP{i}'  for i in range(1, 6)  if f'DP{i}'  not in excl] +
+        [f'CI{i}'  for i in range(1, 9)  if f'CI{i}'  not in excl]
+    )
+    names_block = '\n'.join(
+        '    ' + '  '.join(all_items_ordered[i:i+8])
+        for i in range(0, len(all_items_ordered), 8)
+    )
+
+    # ---- CFA 模型 A-G ----
     cfa_models = {
         'CFA-A (JCP+DP+CI)': {
             'fname': f'CFA_A_JCP_DP_CI_{ts}',
             'vars_lines': f'{_v_jcp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
-                '  JCP BY JCP1* JCP2 JCP3 JCP4 JCP5 JCP6;  JCP@1;\n'
-                '  DP  BY DP1*  DP2  DP3  DP4  DP5;        DP@1;\n'
-                '  CI  BY CI1*  CI2  CI3  CI4  CI5  CI6  CI7  CI8;  CI@1;\n'
+                _by_line('JCP', jcp_items) +
+                _by_line('DP',  dp_items)  +
+                _by_line('CI',  ci_items)
             )
         },
         'CFA-B (HP+DP+CI)': {
             'fname': f'CFA_B_HP_DP_CI_{ts}',
             'vars_lines': f'{_v_hp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
-                '  HP  BY HP1*  HP2  HP3  HP4  HP5  HP6;   HP@1;\n'
-                '  DP  BY DP1*  DP2  DP3  DP4  DP5;        DP@1;\n'
-                '  CI  BY CI1*  CI2  CI3  CI4  CI5  CI6  CI7  CI8;  CI@1;\n'
+                _by_line('HP', hp_items) +
+                _by_line('DP', dp_items) +
+                _by_line('CI', ci_items)
             )
         },
         'CFA-C (JCP+PP+DP+CI)': {
             'fname': f'CFA_C_JCP_PP_DP_CI_{ts}',
             'vars_lines': f'{_v_jcp}\n{_v_pp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
-                '  JCP BY JCP1* JCP2 JCP3 JCP4 JCP5 JCP6;  JCP@1;\n'
-                '  PP  BY PP1*  PP2  PP3  PP4  PP5  PP6;   PP@1;\n'
-                '  DP  BY DP1*  DP2  DP3  DP4  DP5;        DP@1;\n'
-                '  CI  BY CI1*  CI2  CI3  CI4  CI5  CI6  CI7  CI8;  CI@1;\n'
+                _by_line('JCP', jcp_items) +
+                _by_line('PP',  pp_items)  +
+                _by_line('DP',  dp_items)  +
+                _by_line('CI',  ci_items)
             )
         },
         'CFA-D (HP+PP+DP+CI)': {
             'fname': f'CFA_D_HP_PP_DP_CI_{ts}',
             'vars_lines': f'{_v_hp}\n{_v_pp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
-                '  HP  BY HP1*  HP2  HP3  HP4  HP5  HP6;   HP@1;\n'
-                '  PP  BY PP1*  PP2  PP3  PP4  PP5  PP6;   PP@1;\n'
-                '  DP  BY DP1*  DP2  DP3  DP4  DP5;        DP@1;\n'
-                '  CI  BY CI1*  CI2  CI3  CI4  CI5  CI6  CI7  CI8;  CI@1;\n'
+                _by_line('HP', hp_items) +
+                _by_line('PP', pp_items) +
+                _by_line('DP', dp_items) +
+                _by_line('CI', ci_items)
+            )
+        },
+        # ---- 區別效度對照模型 CFA-E/F/G ----
+        'CFA-M1 (HP+JCP+PP+DP+CI, 5F)': {
+            'fname': f'CFA_M1_FiveFactor_{ts}',
+            'vars_lines': f'{_v_hp}\n{_v_jcp}\n{_v_pp}\n{_v_dp}\n{_v_ci}',
+            'model_lines': (
+                _by_line('HP',  hp_items)  +
+                _by_line('JCP', jcp_items) +
+                _by_line('PP',  pp_items)  +
+                _by_line('DP',  dp_items)  +
+                _by_line('CI',  ci_items)  +
+                '  HP WITH JCP;\n'
+            )
+        },
+        'CFA-M2 (CP_merged+PP+DP+CI, 4F)': {
+            'fname': f'CFA_M2_FourFactor_CP_merged_{ts}',
+            'vars_lines': f'{_v_hp}\n{_v_jcp}\n{_v_pp}\n{_v_dp}\n{_v_ci}',
+            'model_lines': (
+                '  CP  BY ' + '  '.join([i + ('*' if j == 0 else '') for j, i in enumerate(hp_items)]) +
+                '\n          ' + '  '.join(jcp_items) + ';  CP@1;\n' +
+                _by_line('PP', pp_items) +
+                _by_line('DP', dp_items) +
+                _by_line('CI', ci_items)
+            )
+        },
+        'CFA-M3 (CP_merged+DP+CI, 3F)': {
+            'fname': f'CFA_M3_ThreeFactor_CP_DP_CI_{ts}',
+            'vars_lines': f'{_v_hp}\n{_v_jcp}\n{_v_dp}\n{_v_ci}',
+            'model_lines': (
+                '  CP  BY ' + '  '.join([i + ('*' if j == 0 else '') for j, i in enumerate(hp_items)]) +
+                '\n          ' + '  '.join(jcp_items) + ';  CP@1;\n' +
+                _by_line('DP', dp_items) +
+                _by_line('CI', ci_items)
             )
         },
     }
@@ -2485,12 +2975,7 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
         content = (
             f'TITLE:\n  {label} CFA (T1)\n  Generated: {ts}\n\n'
             f'DATA:\n  FILE = "{cfa_dat_filename}";\n\n'
-            f'VARIABLE:\n  NAMES =\n'
-            f'    HP1  HP2  HP3  HP4  HP5  HP6\n'
-            f'    JCP1 JCP2 JCP3 JCP4 JCP5 JCP6\n'
-            f'    PP1  PP2  PP3  PP4  PP5  PP6\n'
-            f'    DP1  DP2  DP3  DP4  DP5\n'
-            f'    CI1  CI2  CI3  CI4  CI5  CI6  CI7  CI8;\n'
+            f'VARIABLE:\n  NAMES =\n{names_block};\n'
             f'  USEVARIABLES =\n{vl};\n'
             f'  MISSING =\n{vl} (-999);\n\n'
             f'ANALYSIS:\n  ESTIMATOR = MLR;\n\n'
@@ -2666,7 +3151,10 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
     # ---- 解析 CFA 結果 ----
     for label, ok, out_path, err in cfa_run_results:
         if ok:
-            all_results[label] = {'fit': parse_mplus_fit(out_path), 'out': out_path}
+            entry = {'fit': parse_mplus_fit(out_path), 'out': out_path}
+            # 擷取所有 CFA 模型的因素負荷量供 Sheet 12 使用
+            entry['loadings'] = parse_mplus_cfa_loadings(out_path)
+            all_results[label] = entry
 
     # ---- 解析 RI-CLPM 結果 ----
     # Models A/B: 雙向六路徑 + MODEL INDIRECT (H7 中介)
@@ -2740,7 +3228,8 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
 # ==========================================
 # MODULE F: Excel 綜合報告產生
 # ==========================================
-def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_results):
+def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_results,
+                          variant_label=None, exclude=None):
     """
     產生 Excel 綜合報告 (Thesis_Results_YYYYMMDD_HHMM.xlsx)，含：
       Sheet 1: 樣本背景變項描述統計
@@ -2765,6 +3254,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     wb = openpyxl.Workbook()
     df = g3_sample.copy()
     n_total = len(df)
+    variant_note = f'【敏感性分析：{variant_label}】' if variant_label else ''
 
     # ── 共用樣式 ──────────────────────────────────────────────────
     thin = Side(border_style="thin", color="000000")
@@ -2800,7 +3290,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     # ── Sheet 1: 樣本背景變項 ─────────────────────────────────────
     ws1 = wb.active
     ws1.title = "1_背景變項"
-    title(ws1, f"樣本背景變項描述統計（N = {n_total}，三波配對樣本）", end_col=5)
+    title(ws1, f"樣本背景變項描述統計（N = {n_total}，三波配對樣本）{variant_note}", end_col=5)
     r = 3
     for ci, h in enumerate(["變項", "類別 / 統計量", "人數 / 數值", "%", "單位"], 1):
         hdr(ws1, r, ci, h)
@@ -2864,7 +3354,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
 
     # ── Sheet 2: 敘述統計 + 信度（各量表 × 各波次）─────────────────
     ws2 = wb.create_sheet("2_敘述統計與信度")
-    title(ws2, "各量表各波次敘述統計與信度（N = 277，三波配對樣本）", end_col=12)
+    title(ws2, f"各量表各波次敘述統計與信度（N = {n_total}，三波配對樣本）", end_col=12)
     r = 3
     hdr_cols = ["量表", "說明", "題數",
                 "T1 M", "T1 SD", "T1 α",
@@ -2877,6 +3367,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     scale_defs = [
         ('HP',  'HP 階層停滯（CP 次量表）',        [f'HP{i}'  for i in range(1, 7)]),
         ('JCP', 'JCP 工作內容停滯（CP 次量表）',   [f'JCP{i}' for i in range(1, 7)]),
+        ('CP',  'CP 職涯高原（HP+JCP 合併）',       [f'HP{i}'  for i in range(1, 7)] + [f'JCP{i}' for i in range(1, 7)]),
         ('PP',  'PP 主動型人格',                    [f'PP{i}'  for i in range(1, 7)]),
         ('DP',  'DP 決策拖延',                      [f'DP{i}'  for i in range(1, 6)]),
         ('CI',  'CI 職涯無所作為',                  [f'CI{i}'  for i in range(1, 9)]),
@@ -2909,61 +3400,101 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
                      ('G', 8), ('H', 8), ('I', 8),
                      ('J', 8), ('K', 8), ('L', 8)])
 
-    # ── Sheet 3: 相關矩陣 (T1) ────────────────────────────────────
-    ws3 = wb.create_sheet("3_相關矩陣T1")
-    title(ws3, f"相關分析矩陣（T1，N = {n_total}）  *** p<.001  ** p<.01  * p<.05", end_col=8)
-    r = 3
-    scale_order = ['HP', 'JCP', 'PP', 'DP', 'CI']
-    t1_means = {}
-    for sn in scale_order:
-        if sn == 'HP':
-            cols = [f'HP{i}_T1'  for i in range(1, 7)]
-        elif sn == 'JCP':
-            cols = [f'JCP{i}_T1' for i in range(1, 7)]
-        elif sn == 'PP':
-            cols = [f'PP{i}_T1'  for i in range(1, 7)]
-        elif sn == 'DP':
-            cols = [f'DP{i}_T1'  for i in range(1, 6)]
-        elif sn == 'CI':
-            cols = [f'CI{i}_T1'  for i in range(1, 9)]
-        valid = [c for c in cols if c in df.columns]
-        if valid:
-            t1_means[sn] = df[valid].apply(pd.to_numeric, errors='coerce').mean(axis=1)
+    # ── 相關矩陣 helper（供 T1/T2/T3 各波次共用）─────────────────
+    scale_n_items = {'HP': 6, 'JCP': 6, 'CP': 12, 'PP': 6, 'DP': 5, 'CI': 8}
+    # 次量表版（HP/JCP 分開）與 CP 合併版各自的變數順序
+    scale_order_sub = ['HP', 'JCP', 'PP', 'DP', 'CI']   # 用於分析用相關矩陣
+    scale_order_cp  = ['CP', 'PP', 'DP', 'CI']           # 用於 CP 合併相關矩陣
 
-    hdr(ws3, r, 1, '變數')
-    for ci, sn in enumerate(scale_order, 2):
-        hdr(ws3, r, ci, sn)
-    hdr(ws3, r, len(scale_order) + 2, 'M')
-    hdr(ws3, r, len(scale_order) + 3, 'SD')
-    r += 1
-
-    for i, sn_r in enumerate(scale_order):
-        cell(ws3, r, 1, sn_r, bold=True)
-        for j, sn_c in enumerate(scale_order):
-            col = j + 2
-            if i == j:
-                cell(ws3, r, col, '—')
-            elif i < j and sn_r in t1_means and sn_c in t1_means:
-                valid_dat = pd.concat(
-                    [t1_means[sn_r], t1_means[sn_c]], axis=1).dropna()
-                if len(valid_dat) > 2:
-                    rv, pv = stats.pearsonr(
-                        valid_dat.iloc[:, 0], valid_dat.iloc[:, 1])
-                    star, _ = fmt_p(pv)
-                    cell(ws3, r, col, f"{rv:.2f}{star}")
-                else:
-                    cell(ws3, r, col, '—')
+    def _build_wave_means(sn_list, wave):
+        """計算指定波次中各量表的受試者平均分數。"""
+        wave_means = {}
+        for sn in sn_list:
+            if sn == 'CP':
+                cp_cols = ([f'HP{i}_{wave}' for i in range(1, 7)] +
+                           [f'JCP{i}_{wave}' for i in range(1, 7)])
+                valid = [c for c in cp_cols if c in df.columns]
             else:
-                cell(ws3, r, col, '')
-        if sn_r in t1_means:
-            m  = t1_means[sn_r].mean()
-            sd = t1_means[sn_r].std()
-            cell(ws3, r, len(scale_order) + 2, f"{m:.2f}")
-            cell(ws3, r, len(scale_order) + 3, f"{sd:.2f}")
+                n_items = scale_n_items[sn]
+                cols = [f'{sn}{i}_{wave}' for i in range(1, n_items + 1)]
+                valid = [c for c in cols if c in df.columns]
+            if valid:
+                wave_means[sn] = df[valid].apply(pd.to_numeric, errors='coerce').mean(axis=1)
+        return wave_means
+
+    def make_corr_block(ws, wave, sn_list, subtitle_text, start_row):
+        """在指定起始列寫入一個相關矩陣區塊，回傳下一個可用列號。"""
+        n_scales = len(sn_list)
+        wave_means = _build_wave_means(sn_list, wave)
+        r = start_row
+
+        # 小標題
+        sub = ws.cell(row=r, column=1, value=subtitle_text)
+        sub.font = Font(bold=True, size=10)
+        sub.fill = PatternFill("solid", fgColor="D9E1F2")
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=n_scales + 3)
         r += 1
 
-    set_widths(ws3, [('A', 8), ('B', 10), ('C', 10), ('D', 10),
-                     ('E', 10), ('F', 10), ('G', 8), ('H', 8)])
+        # 欄標題
+        hdr(ws, r, 1, '變數')
+        for ci, sn in enumerate(sn_list, 2):
+            hdr(ws, r, ci, sn)
+        hdr(ws, r, n_scales + 2, 'M')
+        hdr(ws, r, n_scales + 3, 'SD')
+        r += 1
+
+        for i, sn_r in enumerate(sn_list):
+            cell(ws, r, 1, sn_r, bold=True)
+            for j, sn_c in enumerate(sn_list):
+                col = j + 2
+                if i == j:
+                    cell(ws, r, col, '—')
+                elif i < j and sn_r in wave_means and sn_c in wave_means:
+                    valid_dat = pd.concat(
+                        [wave_means[sn_r], wave_means[sn_c]], axis=1).dropna()
+                    if len(valid_dat) > 2:
+                        rv, pv = stats.pearsonr(
+                            valid_dat.iloc[:, 0], valid_dat.iloc[:, 1])
+                        star, _ = fmt_p(pv)
+                        cell(ws, r, col, f"{rv:.2f}{star}")
+                    else:
+                        cell(ws, r, col, '—')
+                else:
+                    cell(ws, r, col, '')
+            if sn_r in wave_means:
+                m  = wave_means[sn_r].mean()
+                sd = wave_means[sn_r].std()
+                cell(ws, r, n_scales + 2, f"{m:.2f}")
+                cell(ws, r, n_scales + 3, f"{sd:.2f}")
+            r += 1
+
+        return r + 1  # 空一列再接下一個區塊
+
+    def make_corr_sheet(ws, wave):
+        """在一張 Sheet 內上下疊放次量表版與 CP 合併版兩張相關矩陣。"""
+        title(ws, f"相關分析矩陣（{wave}，N = {n_total}）  *** p<.001  ** p<.01  * p<.05",
+              end_col=8)
+        ws.cell(row=2, column=1,
+                value="上表：次量表版（HP/JCP 分開，與 Mplus parceling 一致）；"
+                      "下表：CP 合併版（HP+JCP 合一，供整體描述統計參考）"
+                ).font = Font(italic=True, size=9)
+        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=8)
+
+        next_r = make_corr_block(ws, wave, scale_order_sub,
+                                 '表 A：次量表相關矩陣（HP / JCP / PP / DP / CI）', 3)
+        make_corr_block(ws, wave, scale_order_cp,
+                        '表 B：CP 合併相關矩陣（CP / PP / DP / CI）', next_r)
+
+        set_widths(ws, [('A', 8), ('B', 10), ('C', 10), ('D', 10),
+                        ('E', 10), ('F', 10), ('G', 8), ('H', 8)])
+
+    # ── Sheet 3: 相關矩陣 T1 / T2 / T3（每張含次量表＋CP合併兩區塊）──
+    ws3  = wb.create_sheet("3_相關矩陣T1")
+    ws3b = wb.create_sheet("3b_相關矩陣T2")
+    ws3c = wb.create_sheet("3c_相關矩陣T3")
+    make_corr_sheet(ws3,  'T1')
+    make_corr_sheet(ws3b, 'T2')
+    make_corr_sheet(ws3c, 'T3')
 
     # ── Sheet 4 & 5: 適配指數（共用內部函式）─────────────────────
     fit_hdr_cols = ["模型", "結構說明", "χ²", "df", "p(χ²)",
@@ -2975,7 +3506,12 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         for ci, h in enumerate(fit_hdr_cols, 1):
             hdr(ws, r2, ci, h)
         r2 += 1
-        for mkey, mdesc in model_info_dict.items():
+        for mkey, mval in model_info_dict.items():
+            # mval can be (display_name, description) or just a description string
+            if isinstance(mval, tuple):
+                mdisplay, mdesc = mval
+            else:
+                mdisplay, mdesc = mkey, mval
             fit = all_results.get(mkey, {}).get('fit', {})
             chi2_v  = fit.get('chi2')
             df_v    = fit.get('df')
@@ -2991,7 +3527,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
                   isinstance(srmr_v, float) and srmr_v <= .08)
             verdict = '✅' if ok else ('⚠️' if fit else '（尚未執行）')
             vals = [
-                mkey, mdesc,
+                mdisplay, mdesc,
                 f"{chi2_v:.2f}" if isinstance(chi2_v, float) else '—',
                 df_v if df_v is not None else '—',
                 f"{p_chi2:.3f}" if isinstance(p_chi2, float) else '—',
@@ -3016,10 +3552,13 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
 
     ws4 = wb.create_sheet("4_CFA適配")
     write_fit_sheet(ws4, f"CFA 驗證性因素分析適配指數（T1, N = {n_total}）", {
-        'CFA-A (JCP+DP+CI)':     'JCP + DP + CI（3因子）',
-        'CFA-B (HP+DP+CI)':      'HP + DP + CI（3因子）',
-        'CFA-C (JCP+PP+DP+CI)':  'JCP + PP + DP + CI（4因子）',
-        'CFA-D (HP+PP+DP+CI)':   'HP + PP + DP + CI（4因子）',
+        'CFA-A (JCP+DP+CI)':               ('模型1（CFA-A）', 'JCP + DP + CI（3因子，主路徑 A）'),
+        'CFA-B (HP+DP+CI)':                ('模型2（CFA-B）', 'HP + DP + CI（3因子，主路徑 B）'),
+        'CFA-C (JCP+PP+DP+CI)':            ('模型3（CFA-C）', 'JCP + PP + DP + CI（4因子）'),
+        'CFA-D (HP+PP+DP+CI)':             ('模型4（CFA-D）', 'HP + PP + DP + CI（4因子）'),
+        'CFA-M1 (HP+JCP+PP+DP+CI, 5F)':   ('模型5（CFA-E）', 'HP/JCP/PP/DP/CI 五因子（區別效度基準）'),
+        'CFA-M2 (CP_merged+PP+DP+CI, 4F)': ('模型6（CFA-F）', 'CP合併/PP/DP/CI 四因子（對照 CFA-E）'),
+        'CFA-M3 (CP_merged+DP+CI, 3F)':    ('模型7（CFA-G）', 'CP合併/DP/CI 三因子（最簡對照）'),
     })
 
     ws5 = wb.create_sheet("5_RICLPM適配")
@@ -3104,19 +3643,29 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
                 cell(ws7, r, ci, '')
             r += 1
             continue
+        def _fmt_ri(v):
+            """Format RI correlation value; flag Mplus boundary (999 / |v|>1.5)."""
+            if np.isnan(v):
+                return 'N/A'
+            if abs(v) > 1.5:
+                return '（超邊界*）'
+            return f"{v:.3f}"
+
         first = True
         for pair_label, cdata in ri_corrs.items():
             est   = cdata.get('est',   np.nan)
             ci_lo = cdata.get('ci_lo', np.nan)
             ci_hi = cdata.get('ci_hi', np.nan)
             sig   = cdata.get('sig',   False)
+            boundary = (not np.isnan(est) and abs(est) > 1.5)
             cell(ws7, r, 1, mkey if first else '', bold=first, align='left')
             cell(ws7, r, 2, pair_label, align='left')
-            cell(ws7, r, 3, f"{est:.3f}"   if not np.isnan(est)   else 'N/A')
-            cell(ws7, r, 4, f"{ci_lo:.3f}" if not np.isnan(ci_lo) else 'N/A')
-            cell(ws7, r, 5, f"{ci_hi:.3f}" if not np.isnan(ci_hi) else 'N/A')
-            cell(ws7, r, 6, '是 ✅' if sig else '否',
-                 color='006100' if sig else '000000', bold=sig)
+            cell(ws7, r, 3, _fmt_ri(est),   color='C00000' if boundary else '000000')
+            cell(ws7, r, 4, _fmt_ri(ci_lo), color='C00000' if boundary else '000000')
+            cell(ws7, r, 5, _fmt_ri(ci_hi), color='C00000' if boundary else '000000')
+            cell(ws7, r, 6, '是 ✅' if sig else ('⚠ 超邊界' if boundary else '否'),
+                 color=('006100' if sig else ('C00000' if boundary else '000000')),
+                 bold=(sig or boundary))
             first = False
             r += 1
 
@@ -3124,6 +3673,12 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ws7.cell(row=r, column=1,
              value="95% CI 不含 0 即顯著；代表穩定的個人間差異關聯（between-person effect）"
              ).font = Font(italic=True, size=9)
+    ws7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+    r += 1
+    ws7.cell(row=r, column=1,
+             value="*「超邊界」= Mplus 估計值超出 ±1.5（通常為 999.000），代表隨機截距相關超出合理範圍，"
+                   "常見於子群樣本過小（n < 100）或構念間過度相關，需與指導老師討論處理方式。"
+             ).font = Font(italic=True, size=9, color='C00000')
     ws7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
     set_widths(ws7, [('A', 28), ('B', 18), ('C', 10), ('D', 12), ('E', 12), ('F', 14)])
 
@@ -3275,8 +3830,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     # 依執行順序列出所有 .sps 檔
     spss_file_specs = [
         (f"SPSS_Syntax_{ts}.sps",   "步驟1：匯入資料 + 變數標籤（先執行）"),
-        (f"SPSS_Analysis_{ts}.sps", "步驟2：完整分析（描述統計/相關/CMV/CITC/t檢定）"),
-        (f"SPSS_Reliability_{ts}.sps", "步驟2b：信度分析（舊版，已整合於 Analysis）"),
+        (f"SPSS_Analysis_{ts}.sps", "步驟2：完整分析（描述統計/相關/CMV/信度/CITC/題目間相關/t檢定）"),
     ]
     r_spss = 3
     for sps_fname, sps_label in spss_file_specs:
@@ -3337,10 +3891,12 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     fill_ok   = PatternFill("solid", fgColor="E2EFDA")   # 淡綠：保留
     fill_warn = PatternFill("solid", fgColor="FFF2CC")   # 黃：邊界
 
+    excl_s11 = set(exclude or [])
     r9 = 4
     for scale_zh, scale_code, n_items in scale_defs:
         for wave in waves:
-            all_cols_wave = [f"{scale_code}{j}_{wave}" for j in range(1, n_items + 1)]
+            all_cols_wave = [f"{scale_code}{j}_{wave}" for j in range(1, n_items + 1)
+                             if f"{scale_code}{j}" not in excl_s11]
             scale_alpha   = _cronbach(df, all_cols_wave)
 
             for i in range(1, n_items + 1):
@@ -3397,8 +3953,96 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ])
     ws9.freeze_panes = ws9['A4']
 
+    # ── Sheet 12: CFA 因素負荷量（模型1 CFA-A、模型2 CFA-B、模型5 M1）──────────────────────
+    ws12 = wb.create_sheet("12_CFA因素負荷量")
+    title(ws12, f"CFA 標準化因素負荷量（STDYX，T1，N = {n_total}）— 模型1/2/5", end_col=7)
+    note12_cell = ws12.cell(row=2, column=1,
+        value="判斷標準：λ ≥ 0.50 為可接受；< 0.40 建議刪題（標示橘色）；< 0.50 邊緣（標示黃色）；p < .05 顯著")
+    note12_cell.font = Font(italic=True, size=9, color='C00000')
+    ws12.merge_cells(start_row=2, start_column=1, end_row=2, end_column=7)
+
+    for ci, h in enumerate(["因子", "題目", "β (STDYX)", "SE", "z 值", "p 值", "建議"], 1):
+        hdr(ws12, 3, ci, h)
+
+    orange_fill = PatternFill("solid", fgColor="FFB347")
+    yellow_fill = PatternFill("solid", fgColor="FFFF99")
+    blue_fill   = PatternFill("solid", fgColor="BDD7EE")
+
+    factor_label = {
+        'HP': 'HP 階層停滯', 'JCP': 'JCP 工作內容停滯',
+        'PP': 'PP 主動型人格', 'DP': 'DP 決策拖延', 'CI': 'CI 職涯無所作為',
+    }
+
+    def _write_loading_section(ws, r_start, model_key, section_title):
+        """Write one CFA model's loadings block; return next row."""
+        r = r_start
+        loadings = all_results.get(model_key, {}).get('loadings', [])
+        # Section header
+        sec = ws.cell(row=r, column=1, value=section_title)
+        sec.font = Font(bold=True, size=11)
+        sec.fill = blue_fill
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
+        r += 1
+        if not loadings:
+            ws.cell(row=r, column=1,
+                    value=f"（{model_key} 尚未執行或無法解析，請確認 .out 檔）"
+                    ).font = Font(italic=True, color='808080')
+            r += 2
+            return r
+        prev_factor = None
+        for row_d in loadings:
+            fac  = row_d['factor']
+            beta = row_d['beta']
+            p    = row_d['p']
+            if fac != prev_factor:
+                sep = ws.cell(row=r, column=1, value=factor_label.get(fac, fac))
+                sep.font = Font(bold=True, size=10)
+                sep.fill = PatternFill("solid", fgColor="D9E1F2")
+                ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
+                r += 1
+                prev_factor = fac
+            sig_star = '***' if p < .001 else ('**' if p < .01 else ('*' if p < .05 else ''))
+            beta_str = f"{beta:.3f}{sig_star}"
+            if abs(beta) < 0.40:
+                verdict = '⚠ 建議刪題'
+                row_fill = orange_fill
+            elif abs(beta) < 0.50:
+                verdict = '△ 邊緣'
+                row_fill = yellow_fill
+            else:
+                verdict = '✅ 保留'
+                row_fill = None
+            vals = [fac, row_d['item'], beta_str,
+                    f"{row_d['se']:.3f}", f"{row_d['z']:.3f}",
+                    f"{p:.3f}", verdict]
+            for ci, val in enumerate(vals, 1):
+                c = ws.cell(row=r, column=ci, value=val)
+                c.alignment = Alignment(horizontal='center')
+                c.border = bdr
+                if row_fill:
+                    c.fill = row_fill
+            r += 1
+        r += 1  # blank separator
+        return r
+
+    r12 = 4
+    r12 = _write_loading_section(ws12, r12,
+        'CFA-A (JCP+DP+CI)',
+        '模型1（CFA-A）：JCP + DP + CI 三因子標準化因素負荷量')
+    r12 = _write_loading_section(ws12, r12,
+        'CFA-B (HP+DP+CI)',
+        '模型2（CFA-B）：HP + DP + CI 三因子標準化因素負荷量')
+    r12 = _write_loading_section(ws12, r12,
+        'CFA-M1 (HP+JCP+PP+DP+CI, 5F)',
+        '模型5（CFA-E）：HP/JCP/PP/DP/CI 五因子標準化因素負荷量（區別效度基準）')
+
+    set_widths(ws12, [('A', 22), ('B', 10), ('C', 12), ('D', 8),
+                      ('E', 9),  ('F', 8),  ('G', 14)])
+    ws12.freeze_panes = ws12['A4']
+
     # ── 儲存 ─────────────────────────────────────────────────────
-    excel_path = os.path.join(run_dir, f"Thesis_Results_{ts}.xlsx")
+    vtag = ('_' + variant_label.replace(' ', '').replace('+', '_')) if variant_label else ''
+    excel_path = os.path.join(run_dir, f"Thesis_Results{vtag}_{ts}.xlsx")
     try:
         wb.save(excel_path)
         print(f"  [OK] Excel 報告已儲存：{excel_path}")
@@ -3478,18 +4122,12 @@ def main():
     desc_md, alpha_dict, corr_dict = run_descriptives_and_correlations(
         g3_sample if not g3_sample.empty else merged_df, escales)
     
-    # === 產出 CSV 供 SPSS/R 讀取（清除暫時計算欄位）===
-    drop_tmp = [c for c in merged_df.columns if c.startswith('_') or c == 'Edu']
-    csv_df = merged_df.drop(columns=drop_tmp, errors='ignore')
-    csv_filename = f"SPSS_Ready_Data_{ts}.csv"
-    csv_path = os.path.join(run_dir, csv_filename)
-    csv_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
-
-    # === 產出純分析版本（移除身份識別欄位，僅保留分析所需）===
-    id_cols = ['Custom_UID', 'Timestamp', 'Matched_T1_ID', 'Matched_T1_ID_x',
-               'Matched_T1_ID_y', 'System_ID', 'key1', 'key2', 'key3',
-               'dedup_id', 'Email', 'Custom_UID']
-    analysis_df = csv_df.drop(columns=[c for c in id_cols if c in csv_df.columns], errors='ignore')
+    # === 產出分析用 CSV（移除身份識別欄位與暫時計算欄位）===
+    drop_cols = ([c for c in merged_df.columns if c.startswith('_') or c == 'Edu'] +
+                 ['Custom_UID', 'Timestamp', 'Matched_T1_ID', 'Matched_T1_ID_x',
+                  'Matched_T1_ID_y', 'System_ID', 'key1', 'key2', 'key3',
+                  'dedup_id', 'Email'])
+    analysis_df = merged_df.drop(columns=[c for c in drop_cols if c in merged_df.columns], errors='ignore')
     analysis_filename = f"Analysis_Ready_Data_{ts}.csv"
     analysis_path = os.path.join(run_dir, analysis_filename)
     analysis_df.to_csv(analysis_path, index=False, encoding='utf-8-sig')
@@ -3500,11 +4138,7 @@ def main():
     with open(spss_sps_path, 'w', encoding='utf-8-sig') as f:
         f.write(spss_syntax)
 
-    # === 產出 SPSS 信度分析語法（舊版，保留向後相容）===
-    spss_rel_syntax = generate_spss_reliability_syntax(analysis_path, ts)
-    spss_rel_path = os.path.join(run_dir, f"SPSS_Reliability_{ts}.sps")
-    with open(spss_rel_path, 'w', encoding='utf-8-sig') as f:
-        f.write(spss_rel_syntax)
+    # SPSS_Reliability_*.sps 已停止輸出：詳細信度（CORR/MEANS/VARIANCE）已整合至 SPSS_Analysis_*.sps 步驟8
 
     # === 產出 SPSS 完整分析語法（新版，含 CMV/相關/描述統計/CITC）===
     _pp_cols = [f'PP{i+1}_T1' for i in range(6)]
@@ -3517,13 +4151,13 @@ def main():
         f.write(spss_analysis_syntax)
 
     # === 產出 R 語法檔 (單一 CP 合併版) ===
-    r_script_content = generate_r_script(csv_filename)
+    r_script_content = generate_r_script(analysis_filename)
     r_script_path = os.path.join(run_dir, f"RICLPM_Master_{ts}.R")
     with open(r_script_path, 'w', encoding='utf-8') as f:
         f.write(r_script_content)
 
     # === 產出 R 語法檔 (HP & JCP 拆分版) ===
-    split_script_content = generate_r_script_split_cp(csv_filename)
+    split_script_content = generate_r_script_split_cp(analysis_filename)
     split_script_path = os.path.join(run_dir, f"RICLPM_SplitCP_{ts}.R")
     with open(split_script_path, 'w', encoding='utf-8') as f:
         f.write(split_script_content)
@@ -3545,24 +4179,15 @@ def main():
     excel_path = generate_excel_report(
         run_dir, ts, g3_sample_full, alpha_dict, corr_dict, all_mplus_results)
 
-    # === 產出 Mplus CFA 語法（五因子 / 四因子 / 三因子）===
-    cfa_models = [
-        (generate_mplus_cfa_five_factor,   f"CFA_M1_FiveFactor_{ts}.inp",          "CFA M1 五因子(HP/JCP/PP/DP/CI)"),
-        (generate_mplus_cfa_four_factor,   f"CFA_M2_FourFactor_CP_merged_{ts}.inp", "CFA M2 四因子(CP合併/PP/DP/CI)"),
-        (generate_mplus_cfa_three_factor,  f"CFA_M3_ThreeFactor_CP_DP_CI_{ts}.inp","CFA M3 三因子(CP/DP/CI 主路徑)"),
-    ]
-    cfa_paths = []
-    for gen_fn, fname, label in cfa_models:
-        content = gen_fn(cfa_dat_filename, ts)
-        fpath = os.path.join(run_dir, fname)
-        with open(fpath, 'w', encoding='utf-8') as f:
-            f.write(content)
-        cfa_paths.append((label, fpath))
-    mplus_cfa_path  = cfa_paths[0][1]
-    mplus_cfa4_path = cfa_paths[1][1]
-    mplus_cfa3_path = cfa_paths[2][1]
+    # M1/M2/M3 已整合進 run_and_parse_all_models 的 cfa_models dict，
+    # 由 all_inp_list 統一列印，此處無需重複生成。
+    cfa_paths = []  # 保留空串列供相容舊參照
 
-    # === 產出 Mplus 測量恆等性語法 ===
+    # === 產出測量不變性 6 個 .inp 檔（Model A/B × Step 1/2/3）===
+    print("[MI] 產出測量不變性 .inp 語法檔...")
+    generate_mi_inp_files(g3_sample_full, run_dir, ts)
+
+    # === 產出舊版 Mplus 測量恆等性模板（保留供參考）===
     mplus_mi_content = generate_mplus_measurement_invariance(mplus_dat_filename, ts)
     mplus_mi_path = os.path.join(run_dir, f"MI_Configural_Template_{ts}.inp")
     with open(mplus_mi_path, 'w', encoding='utf-8') as f:
@@ -3588,7 +4213,7 @@ def main():
         f"|---|---|---|\n"
         f"| SPSS | 匯入資料 + 變數標籤 | `SPSS_Syntax_{ts}.sps` |\n"
         f"| SPSS | **完整分析**（描述統計/相關/CMV/CITC/t檢定）| `SPSS_Analysis_{ts}.sps` |\n"
-        f"| SPSS | 信度分析（舊版，已整合入 Analysis）| `SPSS_Reliability_{ts}.sps` |\n"
+        f"| SPSS | 完整分析（含詳細信度/題目間相關）| `SPSS_Analysis_{ts}.sps` |\n"
         f"| Mplus | **M1** 五因子 CFA（HP/JCP/PP/DP/CI）| `CFA_M1_FiveFactor_{ts}.inp` |\n"
         f"| Mplus | **M2** 四因子 CFA（CP合併/PP/DP/CI）| `CFA_M2_FourFactor_CP_merged_{ts}.inp` |\n"
         f"| Mplus | **M3** 三因子 CFA（CP/DP/CI 主路徑）| `CFA_M3_ThreeFactor_CP_DP_CI_{ts}.inp` |\n"
@@ -3643,6 +4268,30 @@ def main():
         star = '***' if p < .001 else '**' if p < .01 else '*' if p < .05 else '(ns)'
         return f"r = {r:.2f}{star}"
 
+    def _ffmt(d, key, dec=3):
+        try:
+            v = float(d.get(key, float('nan')))
+        except (TypeError, ValueError):
+            return '—'
+        if np.isnan(v): return '—'
+        return f"{v:.{dec}f}"
+
+    def _pfmt(path_d):
+        if not path_d: return '—', '—', '—'
+        try:
+            est = float(path_d.get('est', float('nan')))
+            se  = float(path_d.get('se',  float('nan')))
+            p   = float(path_d.get('p',   float('nan')))
+        except (TypeError, ValueError):
+            return '—', '—', '—'
+        if np.isnan(est): return '—', '—', '—'
+        star = '***' if p < .001 else '**' if p < .01 else '*' if p < .05 else ''
+        return f"{est:.3f}{star}", f"{se:.3f}", f"{p:.3f}"
+
+    def _prow(label, paths_d, key):
+        b, se, p = _pfmt(paths_d.get(key, {}))
+        return f"| {label} | {b} | {se} | {p} |"
+
     # ANOVA 流失分析結論（依 p 值動態產生文字）
     psych_vars = ['_CP_T1', '_DP_T1', '_CI_T1', '_PP_T1']
     psych_nonsig = all(anova_stats.get(v, {}).get('p', 1) > .05 for v in psych_vars if v in anova_stats)
@@ -3667,6 +4316,49 @@ def main():
     if demo_sig_edu:
         demo_note_parts.append(f"教育程度（χ²={chi_stats.get('edu_chi2', 0):.3f}, p={chi_stats.get('edu_p', 0):.3f}）")
     demo_note = ("在" + "、".join(demo_note_parts) + "上呈現顯著差異，" if demo_note_parts else "")
+
+    # CFA/RI-CLPM 資料提取（供 .md 草稿使用）
+    _cfa_label_map = [
+        ('CFA-A (JCP+DP+CI)',                '模型1（CFA-A）'),
+        ('CFA-B (HP+DP+CI)',                 '模型2（CFA-B）'),
+        ('CFA-C (JCP+PP+DP+CI)',             '模型3（CFA-C）'),
+        ('CFA-D (HP+PP+DP+CI)',              '模型4（CFA-D）'),
+        ('CFA-M1 (HP+JCP+PP+DP+CI, 5F)',    '模型5（CFA-E）'),
+        ('CFA-M2 (CP_merged+PP+DP+CI, 4F)', '模型6（CFA-F）'),
+        ('CFA-M3 (CP_merged+DP+CI, 3F)',    '模型7（CFA-G）'),
+    ]
+    _cfa_fit_rows = []
+    for _mk, _mn in _cfa_label_map:
+        _f = all_mplus_results.get(_mk, {}).get('fit', {})
+        _cfa_fit_rows.append(
+            f"| {_mn} | {_ffmt(_f,'chi2',1)} | {_f.get('df','—')} | "
+            f"{_ffmt(_f,'cfi')} | {_ffmt(_f,'tli')} | "
+            f"{_ffmt(_f,'rmsea')} | {_ffmt(_f,'srmr')} |"
+        )
+    _cfa_fit_block = '\n'.join(_cfa_fit_rows)
+
+    _ra       = all_mplus_results.get('RI-CLPM-A (JCP, Bidirectional)', {})
+    _ra_fit   = _ra.get('fit', {})
+    _ra_paths = _ra.get('paths', {})
+    _ra_indir = _ra.get('indirect', {})
+    _rb       = all_mplus_results.get('RI-CLPM-B (HP, Bidirectional)', {})
+    _rb_fit   = _rb.get('fit', {})
+    _rb_paths = _rb.get('paths', {})
+    _rb_indir = _rb.get('indirect', {})
+
+    def _irow(label, indir_d, key):
+        d = indir_d.get(key, {})
+        if not d: return f"| {label} | — | — | — |"
+        try:
+            est  = float(d.get('est', float('nan')))
+            lo   = float(d.get('ci_lo', float('nan')))
+            hi   = float(d.get('ci_hi', float('nan')))
+            sig  = d.get('sig', False)
+        except (TypeError, ValueError):
+            return f"| {label} | — | — | — |"
+        if np.isnan(est): return f"| {label} | — | — | — |"
+        sig_mark = '✓' if sig else '✗'
+        return f"| {label} | {est:.3f} | [{lo:.3f}, {hi:.3f}] | {sig_mark} |"
 
     # Generate Thesis Draft
     thesis_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -3737,31 +4429,57 @@ def main():
 - PP（主動型人格）與 DP（決策拖延）：{_rfmt('PP_DP')}
 - PP（主動型人格）與 CI（職涯無所作為）：{_rfmt('PP_CI')}
 
+### CFA 驗證性因素分析配適度
+
+| 模型 | χ² | df | CFI | TLI | RMSEA | SRMR |
+|---|---|---|---|---|---|---|
+{_cfa_fit_block}
+
+> 配適度標準：CFI ≥ .90，TLI ≥ .90，RMSEA ≤ .08，SRMR ≤ .08。
+
+---
+
 ### RI-CLPM 動態模型分析結果
 
-> **以下數值待 Mplus 跑完 Step1~Step3 後填入。**
+#### 模型 A（CP 指標 = JCP 工作內容停滯）
 
-**主路徑（Step 1：CP → DP → CI）**
+**模型適配**：χ²(df={_ra_fit.get('df','—')})={_ffmt(_ra_fit,'chi2',1)}, CFI={_ffmt(_ra_fit,'cfi')}, TLI={_ffmt(_ra_fit,'tli')}, RMSEA={_ffmt(_ra_fit,'rmsea')}, SRMR={_ffmt(_ra_fit,'srmr')}
 
-| 路徑 | β（標準化） | SE | p |
+| 路徑（假設） | β（標準化） | SE | p |
 |---|---|---|---|
-| WCP → WDP（T1→T2 / T2→T3 均等）| [待填] | [待填] | [待填] |
-| WDP → WCI（T1→T2 / T2→T3 均等）| [待填] | [待填] | [待填] |
+{_prow('H1a: JCP(t)→DP(t+1)', _ra_paths, 'H1a: JCP→DP')}
+{_prow('H2a: JCP(t)→CI(t+1)', _ra_paths, 'H2a: JCP→CI')}
+{_prow('H3: DP(t)→CI(t+1)',   _ra_paths, 'H3:  DP→CI')}
+{_prow('H4a（反向）: DP(t)→JCP(t+1)', _ra_paths, 'H4a: DP→JCP')}
+{_prow('H5（反向）: CI(t)→DP(t+1)',   _ra_paths, 'H5:  CI→DP')}
+{_prow('H6a（反向）: CI(t)→JCP(t+1)', _ra_paths, 'H6a: CI→JCP')}
 
-**加入 PP 後（Step 2：H8）**
+**中介效果 H7a（JCP→DP→CI，Bootstrap 95% CI）**
 
-| 路徑 | β（標準化） | SE | p |
+| 路徑 | 間接效果 β | 95% CI | 顯著 |
 |---|---|---|---|
-| WPP → WDP（H8a：PP 負向→DP）| [待填] | [待填] | [待填] |
-| WPP → WCI（H8b：PP 負向→CI）| [待填] | [待填] | [待填] |
+{_irow('H7a: JCP→DP→CI', _ra_indir, 'H7a: JCP→DP→CI')}
 
-**模型適配（Step 1 / Step 2 / Step 3）**
+---
 
-| 模型 | CFI | TLI | RMSEA | SRMR |
-|---|---|---|---|---|
-| Step 1 主路徑 | [待填] | [待填] | [待填] | [待填] |
-| Step 2 加入 PP | [待填] | [待填] | [待填] | [待填] |
-| Step 3 加控制變數 | [待填] | [待填] | [待填] | [待填] |
+#### 模型 B（CP 指標 = HP 階層停滯）
+
+**模型適配**：χ²(df={_rb_fit.get('df','—')})={_ffmt(_rb_fit,'chi2',1)}, CFI={_ffmt(_rb_fit,'cfi')}, TLI={_ffmt(_rb_fit,'tli')}, RMSEA={_ffmt(_rb_fit,'rmsea')}, SRMR={_ffmt(_rb_fit,'srmr')}
+
+| 路徑（假設） | β（標準化） | SE | p |
+|---|---|---|---|
+{_prow('H1b: HP(t)→DP(t+1)',  _rb_paths, 'H1b: HP→DP')}
+{_prow('H2b: HP(t)→CI(t+1)',  _rb_paths, 'H2b: HP→CI')}
+{_prow('H3: DP(t)→CI(t+1)',   _rb_paths, 'H3:  DP→CI')}
+{_prow('H4b（反向）: DP(t)→HP(t+1)', _rb_paths, 'H4b: DP→HP')}
+{_prow('H5（反向）: CI(t)→DP(t+1)',  _rb_paths, 'H5:  CI→DP')}
+{_prow('H6b（反向）: CI(t)→HP(t+1)', _rb_paths, 'H6b: CI→HP')}
+
+**中介效果 H7b（HP→DP→CI，Bootstrap 95% CI）**
+
+| 路徑 | 間接效果 β | 95% CI | 顯著 |
+|---|---|---|---|
+{_irow('H7b: HP→DP→CI', _rb_indir, 'H7b: HP→DP→CI')}
 
 ---
 *（本檔案由 pipeline_master.py 於 {ts} 自動產生，N = {n_t3_final}）*
@@ -3778,18 +4496,55 @@ def main():
         print(f"   - Excel 報告       : {excel_path}")
     for label, inp_p in all_inp_list:
         print(f"   - Mplus (新) {label}: {os.path.basename(inp_p)}")
-    print(f"   - SPSS Full Data   : {csv_path}")
     print(f"   - Analysis Data    : {analysis_path}")
     print(f"   - SPSS 匯入語法    : {spss_sps_path}")
     print(f"   - SPSS 完整分析    : {spss_analysis_path}")
-    print(f"   - SPSS 信度語法    : {spss_rel_path}")
+    # SPSS_Reliability_*.sps 已停止輸出，詳細信度已整合至 SPSS_Analysis_*.sps
     print(f"   - Mplus CFA dat    : {cfa_dat_path}")
-    for label, p in cfa_paths:
-        print(f"   - Mplus {label}: {os.path.basename(p)}")
+    # M1/M2/M3 已整合至 all_inp_list，由上方迴圈統一列印
     print(f"   - Mplus MI 模板    : {mplus_mi_path}")
     print(f"   - Mplus RI-CLPM dat: {mplus_dat_path}")
     for label, p in mplus_inp_paths:
         print(f"   - Mplus {label}: {os.path.basename(p)}")
+
+    # ── 刪題目敏感性分析（三個變體版本）────────────────────────────
+    variants = [
+        (['JCP6'],        'noJCP6',       '刪除 JCP6'),
+        (['DP1'],         'noDP1',        '刪除 DP1'),
+        (['JCP6', 'DP1'], 'noJCP6_noDP1', '刪除 JCP6 + DP1'),
+    ]
+    for excl_items, vtag, vdesc in variants:
+        vdir = os.path.join(run_dir, f'variant_{vtag}')
+        os.makedirs(vdir, exist_ok=True)
+        print(f"\n[變體] {vdesc}（{vtag}）→ {vdir}")
+
+        v_mplus_dat_path, v_mplus_dat_fn = generate_mplus_dat(
+            g3_sample_full, vdir, ts, exclude=excl_items)
+        v_cfa_dat_path, v_cfa_dat_fn = generate_cfa_dat(
+            g3_sample_full, vdir, ts, exclude=excl_items)
+
+        print(f"[Mplus] 生成並執行 {vdesc} 版 CFA/RI-CLPM...")
+        v_results, v_inp_list = run_and_parse_all_models(
+            vdir, v_mplus_dat_fn, v_cfa_dat_fn, ts, exclude=excl_items)
+
+        # 產生 variant 專屬 SPSS 語法（刪除指定題目的 COMPUTE / RELIABILITY）
+        import shutil as _shutil
+        _shutil.copy2(os.path.join(run_dir, f"SPSS_Syntax_{ts}.sps"),
+                      os.path.join(vdir, f"SPSS_Syntax_{ts}.sps"))
+        v_spss_analysis = generate_spss_analysis_syntax(
+            analysis_path, ts, pp_median=_pp_median,
+            n_total=len(g3_sample_full), exclude=excl_items)
+        with open(os.path.join(vdir, f"SPSS_Analysis_{ts}.sps"), 'w', encoding='utf-8-sig') as _f:
+            _f.write(v_spss_analysis)
+
+        v_excel = generate_excel_report(
+            vdir, ts, g3_sample_full, alpha_dict, corr_dict, v_results,
+            variant_label=vdesc, exclude=excl_items)
+        if v_excel:
+            print(f"  [OK] 變體 Excel：{v_excel}")
+
+    print("\n--- Pipeline 全部完成（含 3 個刪題變體）---")
+
 
 if __name__ == "__main__":
     main()
