@@ -2842,6 +2842,156 @@ def parse_mplus_cfa_loadings(out_path):
     return rows
 
 
+def run_and_parse_mi(run_dir, ts, mplus_exe=None):
+    """
+    找到測量不變性（MI）Step1/2/3 .inp 檔，自動執行並解析適配指數。
+    計算 ΔCFI 與 ΔRMSEA（Step2-Step1, Step3-Step2）。
+
+    回傳：
+        dict，鍵為 'A (JCP)' 和 'B (HP)'，值為各步驟的適配與差異值。
+    """
+    mi_results = {}
+
+    mi_specs = [
+        ('A (JCP路徑)', 'A_JCP_DP_CI'),
+        ('B (HP路徑)',  'B_HP_DP_CI'),
+    ]
+    step_labels = [
+        ('Step1', 'Step1_Configural', '組態不變性'),
+        ('Step2', 'Step2_Metric',     '因子負荷不變性'),
+        ('Step3', 'Step3_Scalar',     '截距不變性'),
+    ]
+
+    for mi_label, tag in mi_specs:
+        step_fits = {}
+        inp_list  = []
+        for step_key, step_fname_part, step_desc in step_labels:
+            fname  = f"MI_{tag}_{step_fname_part}_{ts}.inp"
+            fpath  = os.path.join(run_dir, fname)
+            if os.path.isfile(fpath):
+                inp_list.append((step_key, fpath, step_desc))
+
+        if inp_list:
+            print(f"[MI] 執行測量不變性 {mi_label}（{len(inp_list)} 步驟）...")
+            for step_key, fpath, step_desc in inp_list:
+                run_results = run_all_mplus([(step_key, fpath)], mplus_exe)
+                for lbl, ok, out_path, err in run_results:
+                    if ok:
+                        step_fits[step_key] = parse_mplus_fit(out_path)
+                    else:
+                        step_fits[step_key] = {}
+
+        # 計算 ΔCFI, ΔRMSEA
+        mi_step_rows = []
+        prev_fit = None
+        for step_key, _, step_desc in step_labels:
+            fit = step_fits.get(step_key, {})
+            cfi_v   = fit.get('cfi')
+            rmsea_v = fit.get('rmsea')
+            chi2_v  = fit.get('chi2')
+            df_v    = fit.get('df')
+            if prev_fit is not None:
+                prev_cfi   = prev_fit.get('cfi')
+                prev_rmsea = prev_fit.get('rmsea')
+                d_cfi   = (cfi_v   - prev_cfi)   if isinstance(cfi_v,   float) and isinstance(prev_cfi,   float) else None
+                d_rmsea = (rmsea_v - prev_rmsea) if isinstance(rmsea_v, float) and isinstance(prev_rmsea, float) else None
+            else:
+                d_cfi, d_rmsea = None, None
+            # 不變性判斷：|ΔCFI| < .01 且 |ΔRMSEA| < .015
+            if d_cfi is not None and d_rmsea is not None:
+                invariant = (abs(d_cfi) < .01 and abs(d_rmsea) < .015)
+            else:
+                invariant = None
+            mi_step_rows.append({
+                'step':      step_key,
+                'desc':      step_desc,
+                'chi2':      chi2_v,
+                'df':        df_v,
+                'cfi':       cfi_v,
+                'rmsea':     rmsea_v,
+                'd_cfi':     d_cfi,
+                'd_rmsea':   d_rmsea,
+                'invariant': invariant,
+            })
+            prev_fit = fit
+
+        mi_results[mi_label] = mi_step_rows
+
+    return mi_results
+
+
+def calculate_ave_cr(out_path):
+    """
+    從 Mplus .out 檔案的 STDYX 區段擷取因素負荷量，
+    計算各因子的 AVE（Average Variance Extracted）與 CR（Composite Reliability）。
+
+    AVE = Σ(λ²) / n  （各因子負荷量平方的平均值）
+    CR  = (Σλ)² / [(Σλ)² + Σ(1-λ²)]
+
+    回傳：{factor: {'loadings': [...], 'n_items': int, 'AVE': float, 'CR': float}}
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return {}
+    try:
+        with open(out_path, 'r', encoding='utf-8', errors='replace') as fh:
+            content = fh.read()
+    except Exception:
+        return {}
+
+    # 定位 STDYX Standardization 區段
+    stdyx_match = re.search(r'STDYX Standardization', content, re.IGNORECASE)
+    if not stdyx_match:
+        return {}
+    stdyx_text = content[stdyx_match.start():]
+
+    # 解析因子 BY 區塊（因素負荷量）
+    # 格式: factor BY 區塊 -> 每行 item  β  SE  z  p
+    factor_data = {}
+    current_factor = None
+    # 找到所有 "FACTOR BY" 區塊：先切分至下一個大段落
+    by_sections = re.findall(
+        r'([A-Z][A-Z0-9_]*)\s+BY\s*\n((?:\s+\S+\s+[\d\.\-]+\s+[\d\.\-]+\s+[\d\.\-]+\s+[\d\.\-]+\s*\n)+)',
+        stdyx_text
+    )
+    for fac_name, rows_text in by_sections:
+        fac_name_upper = fac_name.upper()
+        # 只保留我們關心的因子
+        if fac_name_upper not in ('HP', 'JCP', 'PP', 'DP', 'CI'):
+            continue
+        lambdas = []
+        for row_m in re.finditer(
+            r'\s+(\S+)\s+([\d\.\-]+)\s+([\d\.\-]+)\s+([\d\.\-]+)\s+([\d\.\-]+)',
+            rows_text
+        ):
+            try:
+                lam = float(row_m.group(2))
+                lambdas.append(lam)
+            except ValueError:
+                pass
+        if lambdas:
+            factor_data[fac_name_upper] = lambdas
+
+    if not factor_data:
+        return {}
+
+    result = {}
+    for fac, lambdas in factor_data.items():
+        n = len(lambdas)
+        lam_sq  = [l ** 2 for l in lambdas]
+        ave     = sum(lam_sq) / n if n > 0 else float('nan')
+        sum_lam = sum(lambdas)
+        sum_err = sum(1 - l2 for l2 in lam_sq)
+        cr_denom = (sum_lam ** 2) + sum_err
+        cr = (sum_lam ** 2) / cr_denom if cr_denom > 0 else float('nan')
+        result[fac] = {
+            'loadings': lambdas,
+            'n_items': n,
+            'AVE': round(ave, 3),
+            'CR':  round(cr, 3),
+        }
+    return result
+
+
 # ==========================================
 # MODULE E: 整合執行所有 Mplus 模型並收集結果
 # ==========================================
@@ -3154,6 +3304,8 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
             entry = {'fit': parse_mplus_fit(out_path), 'out': out_path}
             # 擷取所有 CFA 模型的因素負荷量供 Sheet 12 使用
             entry['loadings'] = parse_mplus_cfa_loadings(out_path)
+            # 所有 CFA 模型都計算 AVE / CR（聚合效度）
+            entry['ave_cr'] = calculate_ave_cr(out_path)
             all_results[label] = entry
 
     # ---- 解析 RI-CLPM 結果 ----
@@ -3229,7 +3381,7 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
 # MODULE F: Excel 綜合報告產生
 # ==========================================
 def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_results,
-                          variant_label=None, exclude=None):
+                          variant_label=None, exclude=None, mi_results=None):
     """
     產生 Excel 綜合報告 (Thesis_Results_YYYYMMDD_HHMM.xlsx)，含：
       Sheet 1: 樣本背景變項描述統計
@@ -3352,8 +3504,8 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
 
     set_widths(ws1, [('A', 18), ('B', 20), ('C', 16), ('D', 10), ('E', 12)])
 
-    # ── Sheet 2: 敘述統計 + 信度（各量表 × 各波次）─────────────────
-    ws2 = wb.create_sheet("2_敘述統計與信度")
+    # ── Sheet 4: 敘述統計 + 信度（各量表 × 各波次）─────────────────
+    ws2 = wb.create_sheet("4_敘述統計與信度")
     title(ws2, f"各量表各波次敘述統計與信度（N = {n_total}，三波配對樣本）", end_col=12)
     r = 3
     hdr_cols = ["量表", "說明", "題數",
@@ -3488,10 +3640,10 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         set_widths(ws, [('A', 8), ('B', 10), ('C', 10), ('D', 10),
                         ('E', 10), ('F', 10), ('G', 8), ('H', 8)])
 
-    # ── Sheet 3: 相關矩陣 T1 / T2 / T3（每張含次量表＋CP合併兩區塊）──
-    ws3  = wb.create_sheet("3_相關矩陣T1")
-    ws3b = wb.create_sheet("3b_相關矩陣T2")
-    ws3c = wb.create_sheet("3c_相關矩陣T3")
+    # ── Sheet 6: 相關矩陣 T1 / T2 / T3（每張含次量表＋CP合併兩區塊）──
+    ws3  = wb.create_sheet("6_相關矩陣T1")
+    ws3b = wb.create_sheet("6b_相關矩陣T2")
+    ws3c = wb.create_sheet("6c_相關矩陣T3")
     make_corr_sheet(ws3,  'T1')
     make_corr_sheet(ws3b, 'T2')
     make_corr_sheet(ws3c, 'T3')
@@ -3550,7 +3702,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         set_widths(ws, [('A', 22), ('B', 24), ('C', 8), ('D', 5), ('E', 8),
                         ('F', 7), ('G', 7), ('H', 9), ('I', 14), ('J', 7), ('K', 6)])
 
-    ws4 = wb.create_sheet("4_CFA適配")
+    ws4 = wb.create_sheet("5_CFA適配")
     write_fit_sheet(ws4, f"CFA 驗證性因素分析適配指數（T1, N = {n_total}）", {
         'CFA-A (JCP+DP+CI)':               ('模型1（CFA-A）', 'JCP + DP + CI（3因子，主路徑 A）'),
         'CFA-B (HP+DP+CI)':                ('模型2（CFA-B）', 'HP + DP + CI（3因子，主路徑 B）'),
@@ -3561,7 +3713,71 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         'CFA-M3 (CP_merged+DP+CI, 3F)':    ('模型7（CFA-G）', 'CP合併/DP/CI 三因子（最簡對照）'),
     })
 
-    ws5 = wb.create_sheet("5_RICLPM適配")
+    # ── AVE / CR 聚合效度指標（CFA-E 五因子，附在 CFA適配 表下方）──
+    # 找到目前寫入的最後一行
+    _ave_r = ws4.max_row + 2
+    _ave_title = ws4.cell(row=_ave_r, column=1,
+        value="聚合效度指標（各 CFA 模型，T1）")
+    _ave_title.font = Font(bold=True, size=11)
+    ws4.merge_cells(start_row=_ave_r, start_column=1,
+                    end_row=_ave_r, end_column=6)
+    _ave_r += 1
+    _ave_hdr = ["模型／因子", "題數", "因素負荷量範圍", "AVE", "CR", "判斷（AVE≥.50 & CR≥.70）"]
+    for _ci, _h in enumerate(_ave_hdr, 1):
+        hdr(ws4, _ave_r, _ci, _h)
+    _ave_r += 1
+
+    _fac_labels = {
+        'HP': 'HP 階層停滯', 'JCP': 'JCP 工作內容停滯',
+        'PP': 'PP 主動型人格', 'DP': 'DP 決策拖延',
+        'CI': 'CI 職涯無所作為', 'CP': 'CP 職涯高原（合併）',
+    }
+    _cfa_ave_models = [
+        ('CFA-A (JCP+DP+CI)',               '模型1（CFA-A）', ['JCP', 'DP', 'CI']),
+        ('CFA-B (HP+DP+CI)',                 '模型2（CFA-B）', ['HP',  'DP', 'CI']),
+        ('CFA-C (JCP+PP+DP+CI)',             '模型3（CFA-C）', ['JCP', 'PP', 'DP', 'CI']),
+        ('CFA-D (HP+PP+DP+CI)',              '模型4（CFA-D）', ['HP',  'PP', 'DP', 'CI']),
+        ('CFA-M1 (HP+JCP+PP+DP+CI, 5F)',    '模型5（CFA-E）', ['HP', 'JCP', 'PP', 'DP', 'CI']),
+        ('CFA-M2 (CP_merged+PP+DP+CI, 4F)', '模型6（CFA-F）', ['CP', 'PP', 'DP', 'CI']),
+        ('CFA-M3 (CP_merged+DP+CI, 3F)',    '模型7（CFA-G）', ['CP', 'DP', 'CI']),
+    ]
+    for _mkey, _mname, _facs in _cfa_ave_models:
+        _ave_cr_data = all_results.get(_mkey, {}).get('ave_cr', {})
+        # 模型標題列
+        _mtitle = ws4.cell(row=_ave_r, column=1, value=_mname)
+        _mtitle.font = Font(bold=True, size=10)
+        ws4.merge_cells(start_row=_ave_r, start_column=1,
+                        end_row=_ave_r, end_column=6)
+        _ave_r += 1
+        for _fac in _facs:
+            _fd    = _ave_cr_data.get(_fac, {})
+            _lams  = _fd.get('loadings', [])
+            _n     = _fd.get('n_items', len(_lams))
+            _ave_v = _fd.get('AVE', float('nan'))
+            _cr_v  = _fd.get('CR',  float('nan'))
+            _lam_range = f"{min(_lams):.3f} ~ {max(_lams):.3f}" if _lams else '—'
+            _ave_str   = f"{_ave_v:.3f}" if not np.isnan(_ave_v) else '—'
+            _cr_str    = f"{_cr_v:.3f}"  if not np.isnan(_cr_v)  else '—'
+            _ok = (not np.isnan(_ave_v) and not np.isnan(_cr_v)
+                   and _ave_v >= 0.50 and _cr_v >= 0.70)
+            _verdict = '✅ 通過' if _ok else ('⚠️ 未達標' if _lams else '（尚未執行）')
+            _row_vals = [f"  {_fac_labels.get(_fac, _fac)}", _n, _lam_range,
+                         _ave_str, _cr_str, _verdict]
+            for _ci, _v in enumerate(_row_vals, 1):
+                cell(ws4, _ave_r, _ci, _v,
+                     color=('006100' if _ok else ('C00000' if _lams else '808080')),
+                     bold=(_ci == 6 and bool(_lams)))
+            _ave_r += 1
+        _ave_r += 1  # 模型間空一行
+
+    _note_r = _ave_r
+    ws4.cell(row=_note_r, column=1,
+             value="判斷標準：AVE ≥ .50（聚合效度）；CR ≥ .70（組合信度）；資料來源：各模型 STDYX 標準化因素負荷量"
+             ).font = Font(italic=True, size=9)
+    ws4.merge_cells(start_row=_note_r, start_column=1,
+                    end_row=_note_r, end_column=6)
+
+    ws5 = wb.create_sheet("8_RICLPM適配")
     write_fit_sheet(ws5, f"RI-CLPM 適配指數（parcel 合成分數，N = {n_total}）", {
         'RI-CLPM-A (JCP, Bidirectional)':  'JCP 雙向六路徑（H1a~H6a，含H7a中介）',
         'RI-CLPM-B (HP, Bidirectional)':   'HP 雙向六路徑（H1b~H6b，含H7b中介）',
@@ -3571,8 +3787,62 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         'RI-CLPM-D2 (HP, LowPP)':          'HP 低PP子群（H8b比較組）',
     })
 
-    # ── Sheet 6: RI-CLPM Within-person 路徑係數 ──────────────────
-    ws6 = wb.create_sheet("6_路徑係數")
+    # ── 測量不變性（MI）附加區段（置於 RICLPM適配 表下方）──────────
+    _mi_r = ws5.max_row + 2
+    _mi_title = ws5.cell(row=_mi_r, column=1,
+        value="測量不變性（Measurement Invariance）")
+    _mi_title.font = Font(bold=True, size=11)
+    ws5.merge_cells(start_row=_mi_r, start_column=1,
+                    end_row=_mi_r, end_column=9)
+    _mi_r += 1
+    _mi_hdr = ["路徑", "模型", "χ²", "df", "CFI", "RMSEA", "ΔCFI", "ΔRMSEA",
+               "判斷（|ΔCFI|<.01 & |ΔRMSEA|<.015）"]
+    for _ci, _h in enumerate(_mi_hdr, 1):
+        hdr(ws5, _mi_r, _ci, _h)
+    _mi_r += 1
+    _mi_data = mi_results or {}
+    for _mi_path_lbl, _steps in _mi_data.items():
+        _first_mi = True
+        for _step_d in _steps:
+            _chi2_s = f"{_step_d['chi2']:.2f}" if isinstance(_step_d.get('chi2'), float) else '—'
+            _df_s   = str(_step_d['df']) if _step_d.get('df') is not None else '—'
+            _cfi_s  = f"{_step_d['cfi']:.3f}" if isinstance(_step_d.get('cfi'), float) else '—'
+            _rm_s   = f"{_step_d['rmsea']:.3f}" if isinstance(_step_d.get('rmsea'), float) else '—'
+            _dc_s   = f"{_step_d['d_cfi']:.3f}"   if isinstance(_step_d.get('d_cfi'),   float) else '—'
+            _dr_s   = f"{_step_d['d_rmsea']:.3f}" if isinstance(_step_d.get('d_rmsea'), float) else '—'
+            _inv    = _step_d.get('invariant')
+            if _inv is True:
+                _verdict_mi = '✅ 不變性成立'
+                _vcolor     = '006100'
+            elif _inv is False:
+                _verdict_mi = '⚠️ 不變性不成立'
+                _vcolor     = 'C00000'
+            else:
+                _verdict_mi = '（基準/待執行）'
+                _vcolor     = '808080'
+            _mi_vals = [
+                _mi_path_lbl if _first_mi else '',
+                f"{_step_d['step']}：{_step_d['desc']}",
+                _chi2_s, _df_s, _cfi_s, _rm_s, _dc_s, _dr_s, _verdict_mi
+            ]
+            for _ci, _v in enumerate(_mi_vals, 1):
+                cell(ws5, _mi_r, _ci, _v,
+                     bold=(_ci == 9),
+                     color=(_vcolor if _ci == 9 else '000000'),
+                     align='left' if _ci <= 2 else 'center')
+            _first_mi = False
+            _mi_r += 1
+    _mi_note_r = _mi_r
+    ws5.cell(row=_mi_note_r, column=1,
+             value="不變性判斷標準：|ΔCFI| < .01 且 |ΔRMSEA| < .015（Cheung & Rensvold, 2002）"
+             ).font = Font(italic=True, size=9)
+    ws5.merge_cells(start_row=_mi_note_r, start_column=1,
+                    end_row=_mi_note_r, end_column=9)
+    set_widths(ws5, [('A', 22), ('B', 28), ('C', 9), ('D', 5),
+                     ('E', 8), ('F', 9), ('G', 8), ('H', 9), ('I', 26)])
+
+    # ── Sheet 9: RI-CLPM Within-person 路徑係數 ──────────────────
+    ws6 = wb.create_sheet("9_路徑係數")
     title(ws6, "RI-CLPM Within-person 標準化路徑係數（STDYX，MLR 估計）", end_col=7)
     r = 3
     for ci, h in enumerate(
@@ -3627,6 +3897,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
 
     # ── Sheet 7: RI-CLPM Between-person 隨機截距相關 ─────────────
     ws7 = wb.create_sheet("7_RI相關")
+    # (sheet number 7 unchanged in new ordering)
     title(ws7, "RI-CLPM Between-person 隨機截距相關（STDYX，95% CI）", end_col=6)
     r = 3
     for ci, h in enumerate(
@@ -3644,11 +3915,11 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
             r += 1
             continue
         def _fmt_ri(v):
-            """Format RI correlation value; flag Mplus boundary (999 / |v|>1.5)."""
+            """Format RI correlation value; always show number; flag >1 or 999."""
             if np.isnan(v):
                 return 'N/A'
-            if abs(v) > 1.5:
-                return '（超邊界*）'
+            if abs(v) >= 999:
+                return '999.000（Mplus邊界）'
             return f"{v:.3f}"
 
         first = True
@@ -3657,7 +3928,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
             ci_lo = cdata.get('ci_lo', np.nan)
             ci_hi = cdata.get('ci_hi', np.nan)
             sig   = cdata.get('sig',   False)
-            boundary = (not np.isnan(est) and abs(est) > 1.5)
+            boundary = (not np.isnan(est) and abs(est) > 1.0 and abs(est) < 999)
             cell(ws7, r, 1, mkey if first else '', bold=first, align='left')
             cell(ws7, r, 2, pair_label, align='left')
             cell(ws7, r, 3, _fmt_ri(est),   color='C00000' if boundary else '000000')
@@ -3676,14 +3947,15 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ws7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
     r += 1
     ws7.cell(row=r, column=1,
-             value="*「超邊界」= Mplus 估計值超出 ±1.5（通常為 999.000），代表隨機截距相關超出合理範圍，"
-                   "常見於子群樣本過小（n < 100）或構念間過度相關，需與指導老師討論處理方式。"
+             value="* r 估計值若超出 ±1.000，代表該相關係數超出合理範圍（相關係數理論值介於 -1 到 1 之間）；"
+                   "Mplus 顯示 999.000 表示模型邊界解或估計失敗，常見於子群樣本過小（n < 100）或構念間高度相關，"
+                   "建議與指導老師討論。"
              ).font = Font(italic=True, size=9, color='C00000')
     ws7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
     set_widths(ws7, [('A', 28), ('B', 18), ('C', 10), ('D', 12), ('E', 12), ('F', 14)])
 
-    # ── Sheet 8: H7 間接效果（MODEL INDIRECT 結果）──────────────
-    ws_h7 = wb.create_sheet("8_H7間接效果")
+    # ── Sheet 10: H7 間接效果（MODEL INDIRECT 結果）──────────────
+    ws_h7 = wb.create_sheet("10_H7間接效果")
     title(ws_h7,
           "H7 中介效果：CP(T1)→DP(T2)→CI(T3) Within-person 間接效果（STDYX，MLR）",
           end_col=8)
@@ -3736,9 +4008,8 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     set_widths(ws_h7, [('A', 28), ('B', 22), ('C', 14), ('D', 8),
                        ('E', 8), ('F', 10), ('G', 18), ('H', 10)])
 
-    # ── Sheet 9: Mplus 語法（.inp 內容）─────────────────────────
-    # (renumbered from Sheet 8 to accommodate new H7 indirect effects sheet)
-    ws8 = wb.create_sheet("9_Mplus語法")
+    # ── Sheet 12: Mplus 語法（.inp 內容）────────────────────────
+    ws8 = wb.create_sheet("12_Mplus語法")
     ws8.cell(row=1, column=1,
              value="Mplus 分析語法（.inp）— 可直接複製至 Mplus 執行"
              ).font = Font(bold=True, size=12)
@@ -3750,11 +4021,39 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ws8.column_dimensions['B'].width = 40
     ws8.column_dimensions['C'].width = 80
 
+    # 模型名稱對照表（檔名 → 表 4 中文標題）
+    MPLUS_MODEL_NAME_MAP = {
+        'CFA A JCP DP CI':               '模型1（CFA-A）：JCP + DP + CI',
+        'CFA B HP DP CI':                '模型2（CFA-B）：HP + DP + CI',
+        'CFA C JCP PP DP CI':            '模型3（CFA-C）：JCP + PP + DP + CI',
+        'CFA D HP PP DP CI':             '模型4（CFA-D）：HP + PP + DP + CI',
+        'CFA M1 FiveFactor':             '模型5（CFA-E）：HP/JCP/PP/DP/CI 五因子',
+        'CFA M2 FourFactor CP merged':   '模型6（CFA-F）：CP合併/PP/DP/CI 四因子',
+        'CFA M3 ThreeFactor CP DP CI':   '模型7（CFA-G）：CP合併/DP/CI 三因子',
+        'RI CLPM A JCP Bidir':           'RI-CLPM A：JCP 雙向（H1a–H6a, H7a）',
+        'RI CLPM B HP Bidir':            'RI-CLPM B：HP 雙向（H1b–H6b, H7b）',
+        'RI CLPM C1 JCP HiPP':           'RI-CLPM C1：JCP 高PP子群（H8a）',
+        'RI CLPM C2 JCP LoPP':           'RI-CLPM C2：JCP 低PP子群（H8a）',
+        'RI CLPM D1 HP HiPP':            'RI-CLPM D1：HP 高PP子群（H8b）',
+        'RI CLPM D2 HP LoPP':            'RI-CLPM D2：HP 低PP子群（H8b）',
+        'RI CLPM Step1 CP DP CI':        'RI-CLPM Step1：CP→DP→CI 主路徑',
+        'RI CLPM Step2 Add PP':          'RI-CLPM Step2：加入PP（H8）',
+        'RI CLPM Step3 Controls':        'RI-CLPM Step3：加入控制變數',
+        'MI Configural Template':        '測量不變性模板',
+        'MI A JCP DP CI Step1 Configural': 'MI-A Step1：組態不變性（JCP路徑）',
+        'MI A JCP DP CI Step2 Metric':     'MI-A Step2：負荷不變性（JCP路徑）',
+        'MI A JCP DP CI Step3 Scalar':     'MI-A Step3：截距不變性（JCP路徑）',
+        'MI B HP DP CI Step1 Configural':  'MI-B Step1：組態不變性（HP路徑）',
+        'MI B HP DP CI Step2 Metric':      'MI-B Step2：負荷不變性（HP路徑）',
+        'MI B HP DP CI Step3 Scalar':      'MI-B Step3：截距不變性（HP路徑）',
+    }
+
     # 掃 run_dir 下所有 .inp（排除 _b5 備用版）
     all_inp_paths = []
     for fname in sorted(os.listdir(run_dir)):
         if fname.endswith('.inp') and not fname.endswith('_b5.inp'):
-            lbl = fname.replace(f'_{ts}.inp', '').replace('_', ' ').replace('-', ' ')
+            raw_lbl = fname.replace(f'_{ts}.inp', '').replace('_', ' ').replace('-', ' ')
+            lbl = MPLUS_MODEL_NAME_MAP.get(raw_lbl, raw_lbl)
             all_inp_paths.append((lbl, os.path.join(run_dir, fname)))
 
     r8 = 3
@@ -3814,8 +4113,8 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         var_total = data.sum(axis=1).var(ddof=1)
         return round((k / (k - 1)) * (1 - var_sum / var_total), 3) if var_total > 0 else np.nan
 
-    # ── Sheet 10: SPSS 語法（.sps 內容）────────────────────────────
-    ws_spss = wb.create_sheet("10_SPSS語法")
+    # ── Sheet 11: SPSS 語法（.sps 內容）────────────────────────────
+    ws_spss = wb.create_sheet("11_SPSS語法")
     ws_spss.cell(row=1, column=1,
                  value="SPSS 分析語法（.sps）— 可直接複製至 SPSS 語法視窗執行"
                  ).font = Font(bold=True, size=12)
@@ -3857,8 +4156,8 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         ws_spss.row_dimensions[r_spss].height = max(80, sps_syntax.count('\n') * 12)
         r_spss += 1
 
-    # ── Sheet 11: 各量表題目 item-level 描述統計 + 刪題建議 ────────
-    ws9 = wb.create_sheet("11_量表題目統計")
+    # ── Sheet 2: 各量表題目 item-level 描述統計 + 刪題建議 ────────
+    ws9 = wb.create_sheet("2_量表題目統計")
     ws9.cell(row=1, column=1,
              value=f"各量表 Item-level 描述統計 + 刪題建議（三波完整樣本，N = {n_total}）"
              ).font = Font(bold=True, size=12)
@@ -3953,8 +4252,8 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ])
     ws9.freeze_panes = ws9['A4']
 
-    # ── Sheet 12: CFA 因素負荷量（模型1 CFA-A、模型2 CFA-B、模型5 M1）──────────────────────
-    ws12 = wb.create_sheet("12_CFA因素負荷量")
+    # ── Sheet 3: CFA 因素負荷量（模型1 CFA-A、模型2 CFA-B、模型5 M1）──────────────────────
+    ws12 = wb.create_sheet("3_CFA因素負荷量")
     title(ws12, f"CFA 標準化因素負荷量（STDYX，T1，N = {n_total}）— 模型1/2/5", end_col=7)
     note12_cell = ws12.cell(row=2, column=1,
         value="判斷標準：λ ≥ 0.50 為可接受；< 0.40 建議刪題（標示橘色）；< 0.50 邊緣（標示黃色）；p < .05 顯著")
@@ -4039,6 +4338,37 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     set_widths(ws12, [('A', 22), ('B', 10), ('C', 12), ('D', 8),
                       ('E', 9),  ('F', 8),  ('G', 14)])
     ws12.freeze_panes = ws12['A4']
+
+    # ── 依新版 Sheet 順序排列索引標籤 ──────────────────────────────
+    # 目標順序：1_背景、2_量表題目、3_CFA負荷量、4_敘述統計、
+    #            5_CFA適配、6_相關矩陣(T1/T2/T3)、7_RI相關、
+    #            8_RICLPM適配、9_路徑係數、10_H7、11_SPSS、12_Mplus
+    _desired_sheet_order = [
+        "1_背景變項",
+        "2_量表題目統計",
+        "3_CFA因素負荷量",
+        "4_敘述統計與信度",
+        "5_CFA適配",
+        "6_相關矩陣T1",
+        "6b_相關矩陣T2",
+        "6c_相關矩陣T3",
+        "7_RI相關",
+        "8_RICLPM適配",
+        "9_路徑係數",
+        "10_H7間接效果",
+        "11_SPSS語法",
+        "12_Mplus語法",
+    ]
+    _existing_names = [s.title for s in wb._sheets]
+    _ordered = []
+    for _sname in _desired_sheet_order:
+        if _sname in _existing_names:
+            _ordered.append(wb[_sname])
+    # Append any sheets not in the desired list (preserve them at end)
+    for _s in wb._sheets:
+        if _s not in _ordered:
+            _ordered.append(_s)
+    wb._sheets = _ordered
 
     # ── 儲存 ─────────────────────────────────────────────────────
     vtag = ('_' + variant_label.replace(' ', '').replace('+', '_')) if variant_label else ''
@@ -4174,11 +4504,6 @@ def main():
     all_mplus_results, all_inp_list = run_and_parse_all_models(
         run_dir, mplus_dat_filename, cfa_dat_filename, ts)
 
-    # === 產出 Excel 綜合報告 ===
-    print("[Excel] 產生 Excel 綜合報告...")
-    excel_path = generate_excel_report(
-        run_dir, ts, g3_sample_full, alpha_dict, corr_dict, all_mplus_results)
-
     # M1/M2/M3 已整合進 run_and_parse_all_models 的 cfa_models dict，
     # 由 all_inp_list 統一列印，此處無需重複生成。
     cfa_paths = []  # 保留空串列供相容舊參照
@@ -4187,11 +4512,21 @@ def main():
     print("[MI] 產出測量不變性 .inp 語法檔...")
     generate_mi_inp_files(g3_sample_full, run_dir, ts)
 
+    # === 自動執行 MI 並解析結果 ===
+    print("[MI] 自動執行測量不變性分析...")
+    mi_results = run_and_parse_mi(run_dir, ts)
+
     # === 產出舊版 Mplus 測量恆等性模板（保留供參考）===
     mplus_mi_content = generate_mplus_measurement_invariance(mplus_dat_filename, ts)
     mplus_mi_path = os.path.join(run_dir, f"MI_Configural_Template_{ts}.inp")
     with open(mplus_mi_path, 'w', encoding='utf-8') as f:
         f.write(mplus_mi_content)
+
+    # === 產出 Excel 綜合報告 ===
+    print("[Excel] 產生 Excel 綜合報告...")
+    excel_path = generate_excel_report(
+        run_dir, ts, g3_sample_full, alpha_dict, corr_dict, all_mplus_results,
+        mi_results=mi_results)
 
     # === 產出三階段 Mplus .inp 語法檔 ===
     mplus_steps = [
@@ -4367,13 +4702,98 @@ def main():
             try: os.remove(os.path.join(thesis_dir, f))
             except: pass
 
-    draft_content = f"""# 論文論文段落草稿（自動產生，產生時間：{ts}）
-> ⚠️ 本文件由 pipeline_master.py 依當次資料運算結果自動產生，所有數字皆為實際計算值。
-> RI-CLPM 係數欄位需待 Mplus 執行後手動填入（標記為 [待填]）。
+    # ── 樣本背景統計（供表1）─────────────────────────────────
+    _df_g3 = g3_sample_full.copy()
+    _n_g3  = len(_df_g3)
+    def _demo_pct(col, val):
+        s = pd.to_numeric(_df_g3.get(col, pd.Series(dtype=float)), errors='coerce')
+        cnt = int((s == val).sum())
+        pct = cnt / _n_g3 * 100 if _n_g3 > 0 else 0
+        return cnt, pct
+    def _demo_msd(col):
+        s = pd.to_numeric(_df_g3.get(col, pd.Series(dtype=float)), errors='coerce').dropna()
+        return (round(float(s.mean()), 1), round(float(s.std()), 1)) if len(s) > 0 else ('N/A', 'N/A')
+    _gender_m_n,  _gender_m_p  = _demo_pct('Gender', 1)
+    _gender_f_n,  _gender_f_p  = _demo_pct('Gender', 2)
+    _edu_bach_n,  _edu_bach_p  = _demo_pct('Education', 3)
+    _edu_mast_n,  _edu_mast_p  = _demo_pct('Education', 4)
+    _age_m, _age_sd = _demo_msd('Age')
+
+    # ── AVE/CR 供表3、表5 ────────────────────────────────────
+    _ave_cr = all_mplus_results.get('CFA-M1 (HP+JCP+PP+DP+CI, 5F)', {}).get('ave_cr', {})
+    def _ave_cr_row(fac):
+        d = _ave_cr.get(fac, {})
+        lams = d.get('loadings', [])
+        ave  = d.get('AVE', float('nan'))
+        cr   = d.get('CR',  float('nan'))
+        lr   = f"{min(lams):.3f}~{max(lams):.3f}" if lams else '—'
+        ave_s = f"{ave:.3f}" if not np.isnan(ave) else '—'
+        cr_s  = f"{cr:.3f}"  if not np.isnan(cr)  else '—'
+        ok = (not np.isnan(ave) and not np.isnan(cr) and ave >= .50 and cr >= .70)
+        return f"| {fac} | {d.get('n_items', '—')} | {lr} | {ave_s} | {cr_s} | {'✓' if ok else '✗'} |"
+
+    # ── CFA 因素負荷量（表3，CFA-E）────────────────────────────
+    _m1_loadings = all_mplus_results.get('CFA-M1 (HP+JCP+PP+DP+CI, 5F)', {}).get('loadings', [])
+    _loading_rows = []
+    _prev_fac = None
+    for _ld in _m1_loadings:
+        _f = _ld['factor']
+        if _f != _prev_fac:
+            _loading_rows.append(f"| **{_f}** | | |")
+            _prev_fac = _f
+        _star = '***' if _ld['p'] < .001 else ('**' if _ld['p'] < .01 else ('*' if _ld['p'] < .05 else ''))
+        _loading_rows.append(f"| {_f} | {_ld['item']} | {_ld['beta']:.3f}{_star} |")
+    _loading_block = '\n'.join(_loading_rows) if _loading_rows else '| （待 Mplus 執行後填入） | — | — |'
+
+    # ── RI 相關（表7）────────────────────────────────────────
+    def _ri_corr_rows(model_key):
+        ri = all_mplus_results.get(model_key, {}).get('ri_corr', {})
+        rows = []
+        for pair, d in ri.items():
+            est = d.get('est', float('nan'))
+            lo  = d.get('ci_lo', float('nan'))
+            hi  = d.get('ci_hi', float('nan'))
+            sig = d.get('sig', False)
+            est_s = f"{est:.3f}" if not np.isnan(est) else '—'
+            ci_s  = (f"[{lo:.3f}, {hi:.3f}]"
+                     if not (np.isnan(lo) or np.isnan(hi)) else '—')
+            rows.append(f"| {pair} | {est_s} | {ci_s} | {'✓' if sig else '✗'} |")
+        return '\n'.join(rows) if rows else '| （待執行） | — | — | — |'
+
+    # ── MI 結果（表8）───────────────────────────────────────
+    def _mi_rows(mi_path_label):
+        rows_mi = []
+        for step_d in (mi_results or {}).get(mi_path_label, []):
+            chi2_s = f"{step_d['chi2']:.2f}" if isinstance(step_d.get('chi2'), float) else '—'
+            cfi_s  = f"{step_d['cfi']:.3f}"  if isinstance(step_d.get('cfi'),  float) else '—'
+            rm_s   = f"{step_d['rmsea']:.3f}" if isinstance(step_d.get('rmsea'), float) else '—'
+            dc_s   = f"{step_d['d_cfi']:.3f}"   if isinstance(step_d.get('d_cfi'),   float) else '—'
+            dr_s   = f"{step_d['d_rmsea']:.3f}" if isinstance(step_d.get('d_rmsea'), float) else '—'
+            inv_s  = ('✓' if step_d.get('invariant') is True
+                      else ('✗' if step_d.get('invariant') is False else '基準'))
+            rows_mi.append(
+                f"| {step_d['step']}：{step_d['desc']} | {chi2_s} | "
+                f"{step_d.get('df','—')} | {cfi_s} | {rm_s} | {dc_s} | {dr_s} | {inv_s} |"
+            )
+        return '\n'.join(rows_mi) if rows_mi else '| （待執行） | — | — | — | — | — | — | — |'
+
+    draft_content = f"""# 論文段落草稿（自動產生，產生時間：{ts}）
+> 本文件由 pipeline_master.py 依當次資料運算結果自動產生，所有數字皆為實際計算值。
+> RI-CLPM 係數欄位需待 Mplus 執行後填入（標記為 [待填]）。
 
 ---
 
 ## 第三章：研究對象與研究程序
+
+### 表1：樣本背景（N = {_n_g3}）
+
+| 變項 | 類別 | 人數 | % |
+|---|---|---|---|
+| 性別 | 男 | {_gender_m_n} | {_gender_m_p:.1f}% |
+| | 女 | {_gender_f_n} | {_gender_f_p:.1f}% |
+| 教育程度 | 大學 | {_edu_bach_n} | {_edu_bach_p:.1f}% |
+| | 碩士以上 | {_edu_mast_n} | {_edu_mast_p:.1f}% |
+| 年齡 | M (SD) | {_age_m} ({_age_sd}) 歲 | — |
 
 ### 樣本回收與清理
 
@@ -4411,25 +4831,34 @@ def main():
 
 ## 第四章：研究結果
 
-### 信度分析
+### 表2：量表題目統計（Item-level CITC）
 
-本研究各量表之 Cronbach's α 如下：
+詳見 Excel 表2（各量表題目描述統計、CITC、刪題後 α 及刪題建議）。
+
+---
+
+### 表3：CFA 因素負荷量（CFA-E 五因子，T1）
+
+| 因子 | 題目 | λ (STDYX) |
+|---|---|---|
+{_loading_block}
+
+> 標準：λ ≥ .50 保留；< .40 建議刪題。
+
+---
+
+### 表4：敘述統計與信度
+
+本研究各量表之 Cronbach's α（T1）如下：
 階層停滯（HP）α = {_afmt('HP')}、工作內容停滯（JCP）α = {_afmt('JCP')}、
 職涯高原合併（CP = HP + JCP，12 題）α = {_afmt('CP')}、
 主動型人格（PP）α = {_afmt('PP')}、決策拖延（DP）α = {_afmt('DP')}、
 職涯無所作為（CI）α = {_afmt('CI')}。
 各量表信度均達 .70 以上學術標準（範圍 {alpha_range}），顯示測量工具具備良好之內部一致性。
 
-### 敘述統計與相關分析
+---
 
-相關分析結果（T1，N = {len(g3_sample)}）顯示：
-- CP（職涯高原）與 CI（職涯無所作為）：{_rfmt('CP_CI')}
-- CP（職涯高原）與 DP（決策拖延）：{_rfmt('CP_DP')}
-- DP（決策拖延）與 CI（職涯無所作為）：{_rfmt('DP_CI')}
-- PP（主動型人格）與 DP（決策拖延）：{_rfmt('PP_DP')}
-- PP（主動型人格）與 CI（職涯無所作為）：{_rfmt('PP_CI')}
-
-### CFA 驗證性因素分析配適度
+### 表5：CFA 適配指數
 
 | 模型 | χ² | df | CFI | TLI | RMSEA | SRMR |
 |---|---|---|---|---|---|---|
@@ -4437,9 +4866,48 @@ def main():
 
 > 配適度標準：CFI ≥ .90，TLI ≥ .90，RMSEA ≤ .08，SRMR ≤ .08。
 
+#### 表5b：聚合效度指標（CFA-E 五因子，T1）
+
+| 因子 | 題數 | λ 範圍 | AVE | CR | 通過（AVE≥.50 & CR≥.70）|
+|---|---|---|---|---|---|
+{_ave_cr_row('HP')}
+{_ave_cr_row('JCP')}
+{_ave_cr_row('PP')}
+{_ave_cr_row('DP')}
+{_ave_cr_row('CI')}
+
 ---
 
-### RI-CLPM 動態模型分析結果
+### 表6：相關矩陣（T1，N = {len(g3_sample)}）
+
+相關分析結果（T1）顯示：
+- CP（職涯高原）與 CI（職涯無所作為）：{_rfmt('CP_CI')}
+- CP（職涯高原）與 DP（決策拖延）：{_rfmt('CP_DP')}
+- DP（決策拖延）與 CI（職涯無所作為）：{_rfmt('DP_CI')}
+- PP（主動型人格）與 DP（決策拖延）：{_rfmt('PP_DP')}
+- PP（主動型人格）與 CI（職涯無所作為）：{_rfmt('PP_CI')}
+
+（詳細相關矩陣見 Excel 表6）
+
+---
+
+### 表7：RI-CLPM Between-person 隨機截距相關
+
+#### 模型 A（JCP 路徑）
+
+| 變數對 | r 估計 | 95% CI | 顯著 |
+|---|---|---|---|
+{_ri_corr_rows('RI-CLPM-A (JCP, Bidirectional)')}
+
+#### 模型 B（HP 路徑）
+
+| 變數對 | r 估計 | 95% CI | 顯著 |
+|---|---|---|---|
+{_ri_corr_rows('RI-CLPM-B (HP, Bidirectional)')}
+
+---
+
+### 表8：RI-CLPM 動態模型分析結果
 
 #### 模型 A（CP 指標 = JCP 工作內容停滯）
 
@@ -4454,14 +4922,6 @@ def main():
 {_prow('H5（反向）: CI(t)→DP(t+1)',   _ra_paths, 'H5:  CI→DP')}
 {_prow('H6a（反向）: CI(t)→JCP(t+1)', _ra_paths, 'H6a: CI→JCP')}
 
-**中介效果 H7a（JCP→DP→CI，Bootstrap 95% CI）**
-
-| 路徑 | 間接效果 β | 95% CI | 顯著 |
-|---|---|---|---|
-{_irow('H7a: JCP→DP→CI', _ra_indir, 'H7a: JCP→DP→CI')}
-
----
-
 #### 模型 B（CP 指標 = HP 階層停滯）
 
 **模型適配**：χ²(df={_rb_fit.get('df','—')})={_ffmt(_rb_fit,'chi2',1)}, CFI={_ffmt(_rb_fit,'cfi')}, TLI={_ffmt(_rb_fit,'tli')}, RMSEA={_ffmt(_rb_fit,'rmsea')}, SRMR={_ffmt(_rb_fit,'srmr')}
@@ -4475,11 +4935,49 @@ def main():
 {_prow('H5（反向）: CI(t)→DP(t+1)',  _rb_paths, 'H5:  CI→DP')}
 {_prow('H6b（反向）: CI(t)→HP(t+1)', _rb_paths, 'H6b: CI→HP')}
 
+#### 測量不變性（MI）
+
+**MI-A（JCP 路徑）**
+
+| 步驟 | χ² | df | CFI | RMSEA | ΔCFI | ΔRMSEA | 不變性 |
+|---|---|---|---|---|---|---|---|
+{_mi_rows('A (JCP路徑)')}
+
+**MI-B（HP 路徑）**
+
+| 步驟 | χ² | df | CFI | RMSEA | ΔCFI | ΔRMSEA | 不變性 |
+|---|---|---|---|---|---|---|---|
+{_mi_rows('B (HP路徑)')}
+
+> 判斷標準：|ΔCFI| < .01 且 |ΔRMSEA| < .015（Cheung & Rensvold, 2002）
+
+---
+
+### 表9：路徑係數
+
+（詳見 Excel 表9 RI-CLPM 路徑係數完整表）
+
+---
+
+### 表10：H7 中介效果
+
+**中介效果 H7a（JCP→DP→CI，Bootstrap 95% CI）**
+
+| 路徑 | 間接效果 β | 95% CI | 顯著 |
+|---|---|---|---|
+{_irow('H7a: JCP→DP→CI', _ra_indir, 'H7a: JCP→DP→CI')}
+
 **中介效果 H7b（HP→DP→CI，Bootstrap 95% CI）**
 
 | 路徑 | 間接效果 β | 95% CI | 顯著 |
 |---|---|---|---|
 {_irow('H7b: HP→DP→CI', _rb_indir, 'H7b: HP→DP→CI')}
+
+---
+
+### 分析語法
+
+詳見 Excel 表11（SPSS 語法）與表12（Mplus 語法）。
 
 ---
 *（本檔案由 pipeline_master.py 於 {ts} 自動產生，N = {n_t3_final}）*
