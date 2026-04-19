@@ -26,7 +26,7 @@ description: 論文大內總管（整合學術潤稿、EndNote 引用與 Word �
 // turbo-all
 3. 執行指令 (替換掛號中的檔案名稱)：
 ```bash
-python "g:\其他電腦\我的 PC\NSYSU_HRM\Thesis_LM\04_論文撰寫與產出\論文\thesis_formatter.py" "g:\其他電腦\我的 PC\NSYSU_HRM\Thesis_LM\04_論文撰寫與產出\論文\[您要處理的檔名.md]"
+python ".agent\skills\thesis-pipeline\scripts\thesis_formatter.py" "04_論文撰寫與產出\論文\[您要處理的檔名.md]"
 ```
 
 4. **最終檢查**:

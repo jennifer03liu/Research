@@ -8,7 +8,7 @@ import re
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
-BASE_DIR = r"g:\其他電腦\我的 PC\NSYSU_HRM\Thesis_LM\Research_Questionaire"
+BASE_DIR = r"D:\HR\NSYSU_HRM\Thesis\Research_Questionaire"
 # 自動抓資料夾內最新的問卷 xlsx（檔名含「職涯」或「問卷」）
 import glob as _glob
 _candidates = sorted(
