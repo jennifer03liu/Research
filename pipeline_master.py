@@ -8,7 +8,7 @@ import re
 # ==========================================
 # 1. CONFIGURATION
 # ==========================================
-BASE_DIR = r"D:\HR\NSYSU_HRM\Thesis\Research_Questionaire"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # 自動抓資料夾內最新的問卷 xlsx（檔名含「職涯」或「問卷」）
 import glob as _glob
 _candidates = sorted(
@@ -467,19 +467,26 @@ def analyze_attrition(merged, track):
         merged['Edu'] = merged['Education']
 
     anova_stats = {}   # 儲存各變數 p 值供 draft 使用
+    results_md += "| 變數 | G1 (僅T1) | G2 (T1+T2) | G3 (T1+T2+T3) | F | p |\n"
+    results_md += "|---|---|---|---|---|---|\n"
     for var, name in zip(['Age', '_CP_T1', '_HP_T1', '_JCP_T1', '_DP_T1', '_CI_T1', '_PP_T1'],
                          ['年齡', '整體職涯停滯', '階層停滯', '工作停滯', '決策拖延', '職涯無所作為', '主動型人格']):
         if var in merged.columns:
             m1, m2, m3, f, p = anova(var)
-            results_md += f"**{name}**: G1={m1:.2f}, G2={m2:.2f}, G3={m3:.2f} | F={f:.3f}, p={p:.3f}\n"
+            sig = ' *' if p < .05 else ''
+            results_md += f"| **{name}** | {m1:.2f} | {m2:.2f} | {m3:.2f} | {f:.3f} | {p:.3f}{sig} |\n"
             anova_stats[var] = {'m1': m1, 'm2': m2, 'm3': m3, 'F': f, 'p': p}
+    results_md += "\n"
 
     chi_stats = {}
     try:
         chi2_g, p_g, _, _ = stats.chi2_contingency(pd.crosstab(merged['Group'], merged['Gender']))
         chi2_e, p_e, _, _ = stats.chi2_contingency(pd.crosstab(merged['Group'], merged['Edu']))
-        results_md += f"\n**性別比例差異 (Chi-square)**: chi2={chi2_g:.3f}, p={p_g:.3f}\n"
-        results_md += f"**教育程度差異 (Chi-square)**: chi2={chi2_e:.3f}, p={p_e:.3f}\n"
+        results_md += "| 類別變項 | chi² | p |\n"
+        results_md += "|---|---|---|\n"
+        results_md += f"| **性別比例差異** | {chi2_g:.3f} | {p_g:.3f}{' *' if p_g < .05 else ''} |\n"
+        results_md += f"| **教育程度差異** | {chi2_e:.3f} | {p_e:.3f}{' *' if p_e < .05 else ''} |\n"
+        results_md += "\n"
         chi_stats = {'gender_chi2': chi2_g, 'gender_p': p_g, 'edu_chi2': chi2_e, 'edu_p': p_e}
     except:
         pass
@@ -1918,7 +1925,7 @@ T-TEST GROUPS = PP_group(0 1)
 * 結束語.
 * ============================================================.
 * 以上完成所有 SPSS 可執行分析.
-* CFA 量測模型、測量恆等性、RI-CLPM 請使用 Mplus 語法（.inp）執行.
+* CFA 量測模型與測量不變性請使用 Mplus 語法（.inp）執行.
 * 詳見同目錄下的 Mplus .inp 語法檔.
 """
 
@@ -1946,6 +1953,25 @@ def generate_cfa_dat(df, output_dir, ts, exclude=None):
     dat_filename = f"CFA_Data_T1{tag}_{ts}.dat"
     dat_path = os.path.join(output_dir, dat_filename)
     cfa_df.to_csv(dat_path, sep=' ', index=False, header=False, float_format='%.4f')
+    return dat_path, dat_filename
+
+
+def generate_cfa_h_dat(df, output_dir, ts):
+    """跨波次 CFA-H 資料：HP/JCP/PP 取 T1，DP 取 T2，CI 取 T3（同一份 .dat，短變數名）"""
+    col_map = (
+        [(f'HP{i+1}_T1',  f'HP{i+1}')  for i in range(6)] +
+        [(f'JCP{i+1}_T1', f'JCP{i+1}') for i in range(6)] +
+        [(f'PP{i+1}_T1',  f'PP{i+1}')  for i in range(6)] +
+        [(f'DP{i+1}_T2',  f'DP{i+1}')  for i in range(5)] +
+        [(f'CI{i+1}_T3',  f'CI{i+1}')  for i in range(8)]
+    )
+    col_map = [(src, dst) for src, dst in col_map if src in df.columns]
+    src_cols = [src for src, _ in col_map]
+    dst_cols = [dst for _, dst in col_map]
+    cfa_h_df = df[src_cols].rename(columns=dict(col_map)).reindex(columns=dst_cols).fillna(-999)
+    dat_filename = f"CFA_H_CrossWave_{ts}.dat"
+    dat_path = os.path.join(output_dir, dat_filename)
+    cfa_h_df.to_csv(dat_path, sep=' ', index=False, header=False, float_format='%.4f')
     return dat_path, dat_filename
 
 
@@ -2111,6 +2137,37 @@ def generate_mi_inp_files(df, run_dir, ts):
                 lines.append(f'    {items}')
         return '\n'.join(lines)
 
+    def _wrap_by(factor, items_with_labels, max_len=85):
+        """把 BY 語法行拆成不超過 max_len 字元的多行（Mplus 7.4 上限 90）。"""
+        prefix = f'  {factor} BY '
+        indent = ' ' * len(prefix)
+        lines, cur = [], prefix
+        for token in items_with_labels:
+            candidate = cur + token + ' '
+            if len(candidate) > max_len and cur != prefix:
+                lines.append(cur.rstrip())
+                cur = indent + token + ' '
+            else:
+                cur = candidate
+        lines.append(cur.rstrip() + ';')
+        return '\n'.join(lines)
+
+    def _resid_cov_block(prefixes_n):
+        """
+        Cross-wave residual covariances for same indicator across T1/T2/T3.
+        Standard practice in longitudinal MI (Little 2013; Widaman 1985):
+        item-specific variance is stable over time and must be freed.
+        Without this, the model cannot converge because it cannot explain
+        the extra correlation between the same item measured at different waves.
+        """
+        lines = ['  ! Cross-wave residual covariances (same item, different waves)']
+        for prefix, n in prefixes_n:
+            for i in range(1, n + 1):
+                v = f'{prefix}{i}'
+                lines.append(f'  {v}_T1 WITH {v}_T2 {v}_T3;')
+                lines.append(f'  {v}_T2 WITH {v}_T3;')
+        return lines
+
     def _configural(dat_fn, prefixes_n, tag):
         var_names = []
         for wave in ['T1', 'T2', 'T3']:
@@ -2126,10 +2183,12 @@ def generate_mi_inp_files(df, run_dir, ts):
                 model_lines.append(f'  {factor} BY {items}* ({prefix.lower()}_l{wi}_1);')
                 model_lines.append(f'  {factor}@1;')
             model_lines.append('')
+        model_lines.append('')
+        model_lines.extend(_resid_cov_block(prefixes_n))
         return f"""\
 TITLE:
-  測量不變性 — 形態模型（Configural）
-  Model {tag}，三波縱貫
+  Measurement Invariance - Configural Model
+  Model {tag}, Three-wave longitudinal
   Generated: {ts}
 
 DATA:
@@ -2167,16 +2226,17 @@ OUTPUT:
                     f'{prefix}{i}_{wave} ({prefix.lower()}_l{i})' for i in range(1, n + 1))
                 factor = f'F_{prefix}{wi}'
                 # First item gets * to free estimate, rest constrained equal across waves
-                items_first = f'{prefix}1_{wave}* ({prefix.lower()}_l1)'
-                items_rest  = ' '.join(
-                    f'{prefix}{i}_{wave} ({prefix.lower()}_l{i})' for i in range(2, n + 1))
-                model_lines.append(f'  F_{prefix}{wi} BY {items_first} {items_rest};')
+                items_tokens = [f'{prefix}1_{wave}* ({prefix.lower()}_l1)'] + [
+                    f'{prefix}{i}_{wave} ({prefix.lower()}_l{i})' for i in range(2, n + 1)]
+                model_lines.append(_wrap_by(f'F_{prefix}{wi}', items_tokens))
                 model_lines.append(f'  F_{prefix}{wi}@1;')
             model_lines.append('')
+        model_lines.append('')
+        model_lines.extend(_resid_cov_block(prefixes_n))
         return f"""\
 TITLE:
-  測量不變性 — 因子負荷等同模型（Metric）
-  Model {tag}，三波縱貫
+  Measurement Invariance - Metric Model (equal loadings)
+  Model {tag}, Three-wave longitudinal
   Generated: {ts}
 
 DATA:
@@ -2211,9 +2271,9 @@ OUTPUT:
         for prefix, n in prefixes_n:
             for wi, wave in enumerate(['T1', 'T2', 'T3'], 1):
                 items_first = f'{prefix}1_{wave}* ({prefix.lower()}_l1)'
-                items_rest  = ' '.join(
-                    f'{prefix}{i}_{wave} ({prefix.lower()}_l{i})' for i in range(2, n + 1))
-                model_lines.append(f'  F_{prefix}{wi} BY {items_first} {items_rest};')
+                items_tokens = [f'{prefix}1_{wave}* ({prefix.lower()}_l1)'] + [
+                    f'{prefix}{i}_{wave} ({prefix.lower()}_l{i})' for i in range(2, n + 1)]
+                model_lines.append(_wrap_by(f'F_{prefix}{wi}', items_tokens))
                 model_lines.append(f'  F_{prefix}{wi}@1;')
             # intercept constraints across waves
             for i in range(1, n + 1):
@@ -2221,10 +2281,12 @@ OUTPUT:
                     f'[{prefix}{i}_{wave}]' for wave in ['T1', 'T2', 'T3'])
                 model_lines.append(f'  {intercepts} ({prefix.lower()}_int{i});')
             model_lines.append('')
+        model_lines.append('')
+        model_lines.extend(_resid_cov_block(prefixes_n))
         return f"""\
 TITLE:
-  測量不變性 — 截距等同模型（Scalar）
-  Model {tag}，三波縱貫
+  Measurement Invariance - Scalar Model (equal intercepts)
+  Model {tag}, Three-wave longitudinal
   Generated: {ts}
 
 DATA:
@@ -2395,6 +2457,24 @@ def generate_mplus_dat(df, output_dir, ts, exclude=None):
           f"低PP組(0): {(mplus_df['PP_group']==0).sum()}人  "
           f"高PP組(1): {(mplus_df['PP_group']==1).sum()}人")
 
+    # 職涯階段虛擬變數 + 效果編碼（deviation coding：各階段 vs. 其他兩階段平均）
+    _age = mplus_df['Age'].replace(-999, np.nan)
+    mplus_df['EXP']   = ((_age >= 21) & (_age <= 30)).astype(int)
+    mplus_df['MAINT'] = (_age >= 41).astype(int)
+    mplus_df.loc[mplus_df['Age'] == -999, ['EXP', 'MAINT']] = -999
+    # 效果編碼：focal stage = +1，其他兩階段各 = -0.5
+    mplus_df['EXP_C']   = np.where(mplus_df['Age'] == -999, -999.0,
+                           np.where((_age >= 21) & (_age <= 30),  1.0, -0.5))
+    mplus_df['MAINT_C'] = np.where(mplus_df['Age'] == -999, -999.0,
+                           np.where(_age >= 41,                    1.0, -0.5))
+    _n_exp   = (mplus_df['EXP']   == 1).sum()
+    _n_maint = (mplus_df['MAINT'] == 1).sum()
+    _n_estab = ((mplus_df['EXP'] == 0) & (mplus_df['MAINT'] == 0) & (mplus_df['Age'] != -999)).sum()
+    print(f"[職涯階段] 探索期(EXP,21-30): {_n_exp}人  "
+          f"建立期(31-40): {_n_estab}人  "
+          f"維持期(MAINT,41+): {_n_maint}人  "
+          f"（效果編碼：各階段 vs. 另外兩階段平均）")
+
     mplus_df = mplus_df.fillna(-999)
     tag = ('_excl' + '_'.join(sorted(excl))) if excl else ''
     dat_filename = f"Mplus_Data{tag}_{ts}.dat"
@@ -2438,22 +2518,15 @@ def fmt_beta(b, p, decimals=3):
 # ==========================================
 def save_inp_dual_encoding(content, run_dir, base_fname):
     """
-    將 Mplus .inp 語法儲存為兩個版本：
-      {base_fname}.inp    → UTF-8  （現代 Windows / Mac）
-      {base_fname}_b5.inp → Big5/CP950（舊版繁中 Windows）
-    中文字元若無法轉換 Big5 則以 ? 替代。
+    Save Mplus .inp syntax as UTF-8. Returns (utf8_path, None).
+    Big5 version no longer generated since all comments are in English.
     """
     utf8_path = os.path.join(run_dir, base_fname + '.inp')
-    b5_path   = os.path.join(run_dir, base_fname + '_b5.inp')
 
     with open(utf8_path, 'w', encoding='utf-8') as f:
         f.write(content)
 
-    b5_bytes = content.encode('big5', errors='replace')
-    with open(b5_path, 'wb') as f:
-        f.write(b5_bytes)
-
-    return utf8_path, b5_path
+    return utf8_path, None
 
 
 # ==========================================
@@ -2627,6 +2700,34 @@ def parse_mplus_stdyx(out_path, path_map):
                 'z':   float(row.group(3)),
                 'p':   float(row.group(4))
             }
+
+    # 從 CONFIDENCE INTERVALS OF STANDARDIZED MODEL RESULTS 補 95% CI
+    # 注意：用 \Z 直接到檔末，避免 [A-Z]{3} 誤判預測變項名（如 JCP, HP）為終止符
+    ci_sec_m = re.search(
+        r'CONFIDENCE INTERVALS OF STANDARDIZED MODEL RESULTS.*?STDYX Standardization\s+(.*)',
+        text, re.DOTALL
+    )
+    if ci_sec_m:
+        ci_text = ci_sec_m.group(1)
+        for label, (outcome, predictor) in path_map.items():
+            if label not in results:
+                continue
+            ci_on_m = re.search(
+                rf'{re.escape(outcome)}\s+ON\s+(.*?)(?=\n\s*\n\s*\w|\n\s*\n\s*$)',
+                ci_text, re.DOTALL | re.IGNORECASE
+            )
+            if not ci_on_m:
+                continue
+            ci_on_text = ci_on_m.group(1)
+            # 7 columns: lo.5% lo2.5% lo5% est hi5% hi2.5% hi.5%
+            ci_row = re.search(
+                rf'\b{re.escape(predictor)}\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)',
+                ci_on_text, re.IGNORECASE
+            )
+            if ci_row:
+                results[label]['ci_lo'] = float(ci_row.group(2))  # Lower 2.5%
+                results[label]['ci_hi'] = float(ci_row.group(6))  # Upper 2.5%
+
     return results
 
 
@@ -2780,6 +2881,168 @@ def parse_mplus_indirect(out_path, indirect_specs):
     return results
 
 
+def parse_mplus_modconstraint(out_path, param_names):
+    """
+    Parse MODEL CONSTRAINT NEW(...) parameters from Mplus .out.
+    Looks for "New/Additional Parameters" in MODEL RESULTS and BC Bootstrap CI sections.
+    param_names: list of uppercase parameter names (e.g. ['IND_HI_JCP', 'IND_LO_JCP']).
+    Returns: {name: {'est', 'se', 'z', 'p', 'ci_lo', 'ci_hi', 'sig'}}
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return {}
+    try:
+        with open(out_path, 'r', encoding='utf-8', errors='replace') as f:
+            text = f.read()
+    except Exception:
+        return {}
+
+    results = {}
+
+    # --- Unstandardized estimates from MODEL RESULTS ---
+    est_m = re.search(
+        r'MODEL RESULTS\s.*?New/Additional Parameters\s+(.*?)'
+        r'(?=\n\s*\n\s*[A-Z]|\nR-SQUARE|\Z)',
+        text, re.DOTALL | re.IGNORECASE
+    )
+    est_text = est_m.group(1) if est_m else ''
+
+    for pname in param_names:
+        row = re.search(
+            rf'^\s*{re.escape(pname)}\s+([-\d.]+)\s+([\d.]+)\s+([-\d.]+)\s+([\d.]+)',
+            est_text, re.MULTILINE | re.IGNORECASE
+        )
+        if row:
+            results[pname] = {
+                'est': float(row.group(1)),
+                'se':  float(row.group(2)),
+                'z':   float(row.group(3)),
+                'p':   float(row.group(4)),
+                'ci_lo': np.nan,
+                'ci_hi': np.nan,
+                'sig': float(row.group(4)) < .05
+            }
+
+    # --- BC Bootstrap CI from CONFIDENCE INTERVALS OF MODEL RESULTS ---
+    ci_m = re.search(
+        r'CONFIDENCE INTERVALS OF MODEL RESULTS.*?New/Additional Parameters\s+(.*?)'
+        r'(?=\nTECHNICAL|\Z)',
+        text, re.DOTALL | re.IGNORECASE
+    )
+    ci_text = ci_m.group(1) if ci_m else ''
+
+    for pname in param_names:
+        ci_row = re.search(
+            rf'^\s*{re.escape(pname)}\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)'
+            r'\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)',
+            ci_text, re.MULTILINE | re.IGNORECASE
+        )
+        if ci_row:
+            ci_lo = float(ci_row.group(2))  # Lower 2.5%
+            ci_hi = float(ci_row.group(6))  # Upper 2.5%
+            sig = not (ci_lo <= 0 <= ci_hi)
+            if pname in results:
+                results[pname].update({'ci_lo': ci_lo, 'ci_hi': ci_hi, 'sig': sig})
+            else:
+                results[pname] = {
+                    'est': float(ci_row.group(4)),
+                    'se': np.nan, 'z': np.nan, 'p': np.nan,
+                    'ci_lo': ci_lo, 'ci_hi': ci_hi, 'sig': sig
+                }
+
+    return results
+
+
+def parse_mplus_bayes_paths(out_path, path_map):
+    """
+    Parse Bayesian Mplus STDYX output for path coefficients.
+    Bayesian format per row: predictor  est  sd  p_onetail  ci_lo  ci_hi
+    Significance = 95% HPD CI excludes 0.
+    Returns {label: {'est', 'sd', 'p', 'ci_lo', 'ci_hi', 'sig'}}
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return {}
+    try:
+        with open(out_path, 'r', encoding='utf-8', errors='replace') as f:
+            text = f.read()
+    except Exception:
+        return {}
+
+    m = re.search(
+        r'STDYX Standardization\s+(.*?)(?=\nR-SQUARE|\nSTD |\nTECHNICAL|\Z)',
+        text, re.DOTALL
+    )
+    if not m:
+        return {}
+    stdyx = m.group(1)
+
+    results = {}
+    for label, (outcome, predictor) in path_map.items():
+        on_m = re.search(
+            rf'{re.escape(outcome)}\s+ON\s+(.*?)(?=\n\s*\n\s*\w|\n\s*\n\s*$)',
+            stdyx, re.DOTALL | re.IGNORECASE
+        )
+        if not on_m:
+            continue
+        row = re.search(
+            rf'\b{re.escape(predictor)}\s+([-\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([-\d.]+)\s+([-\d.]+)',
+            on_m.group(1), re.IGNORECASE
+        )
+        if row:
+            est, sd, p = float(row.group(1)), float(row.group(2)), float(row.group(3))
+            ci_lo, ci_hi = float(row.group(4)), float(row.group(5))
+            results[label] = {
+                'est': est, 'sd': sd, 'p': p,
+                'ci_lo': ci_lo, 'ci_hi': ci_hi,
+                'sig': not (ci_lo <= 0 <= ci_hi)
+            }
+    return results
+
+
+def parse_mplus_bayes_modconstraint(out_path, param_names):
+    """
+    Parse Bayesian Mplus MODEL CONSTRAINT NEW parameters from STDYX section.
+    Bayesian format: param  est  sd  p_onetail  ci_lo  ci_hi
+    Significance = 95% HPD CI excludes 0.
+    Returns {name: {'est', 'sd', 'p', 'ci_lo', 'ci_hi', 'sig'}}
+    """
+    if not out_path or not os.path.isfile(out_path):
+        return {}
+    try:
+        with open(out_path, 'r', encoding='utf-8', errors='replace') as f:
+            text = f.read()
+    except Exception:
+        return {}
+
+    # 先找第一個 New/Additional Parameters（MODEL RESULTS 段，5欄 Bayesian 格式）
+    # 必須在 STANDARDIZED MODEL RESULTS 之前，避免讀到 STDYX 段的 7欄格式
+    for pattern in [
+        r'New/Additional Parameters\s+(.*?)(?=\nSTANDARDIZED|\nTECHNICAL|\Z)',
+        r'STDYX Standardization.*?New/Additional Parameters\s+(.*?)(?=\nTECHNICAL|\Z)',
+    ]:
+        m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        if m:
+            block = m.group(1)
+            break
+    else:
+        return {}
+
+    results = {}
+    for pname in param_names:
+        row = re.search(
+            rf'^\s*{re.escape(pname)}\s+([-\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([-\d.]+)\s+([-\d.]+)',
+            block, re.MULTILINE | re.IGNORECASE
+        )
+        if row:
+            est, sd, p = float(row.group(1)), float(row.group(2)), float(row.group(3))
+            ci_lo, ci_hi = float(row.group(4)), float(row.group(5))
+            results[pname] = {
+                'est': est, 'sd': sd, 'p': p,
+                'ci_lo': ci_lo, 'ci_hi': ci_hi,
+                'sig': not (ci_lo <= 0 <= ci_hi)
+            }
+    return results
+
+
 def parse_mplus_cfa_loadings(out_path):
     """
     從 Mplus .out 的 STDYX Standardization 區段擷取 CFA 因素負荷量。
@@ -2887,7 +3150,9 @@ def run_and_parse_mi(run_dir, ts, mplus_exe=None):
         for step_key, _, step_desc in step_labels:
             fit = step_fits.get(step_key, {})
             cfi_v   = fit.get('cfi')
+            tli_v   = fit.get('tli')
             rmsea_v = fit.get('rmsea')
+            srmr_v  = fit.get('srmr')
             chi2_v  = fit.get('chi2')
             df_v    = fit.get('df')
             if prev_fit is not None:
@@ -2908,7 +3173,9 @@ def run_and_parse_mi(run_dir, ts, mplus_exe=None):
                 'chi2':      chi2_v,
                 'df':        df_v,
                 'cfi':       cfi_v,
+                'tli':       tli_v,
                 'rmsea':     rmsea_v,
+                'srmr':      srmr_v,
                 'd_cfi':     d_cfi,
                 'd_rmsea':   d_rmsea,
                 'invariant': invariant,
@@ -2996,12 +3263,15 @@ def calculate_ave_cr(out_path):
 # MODULE E: 整合執行所有 Mplus 模型並收集結果
 # ==========================================
 def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
-                              mplus_exe=None, exclude=None):
+                              mplus_exe=None, exclude=None, phases=None,
+                              cfa_h_dat_filename=None):
     """
     生成 CFA/RI-CLPM .inp → 自動執行 → 解析結果
     exclude: list of item names to remove from CFA (e.g. ['JCP6', 'DP1'])
     回傳 all_results dict 供 Excel/Word/PPT 使用
     """
+    if phases is None:
+        phases = ['cfa', 'riclpm']
     excl = set(exclude or [])
     all_results = {}
 
@@ -3083,9 +3353,9 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
                 _by_line('CI', ci_items)
             )
         },
-        # ---- 區別效度對照模型 CFA-E/F/G ----
-        'CFA-M1 (HP+JCP+PP+DP+CI, 5F)': {
-            'fname': f'CFA_M1_FiveFactor_{ts}',
+        # ---- Discriminant validity comparison models CFA-E/F/G ----
+        'CFA-E (HP+JCP+PP+DP+CI, 5F)': {
+            'fname': f'CFA_E_FiveFactor_{ts}',
             'vars_lines': f'{_v_hp}\n{_v_jcp}\n{_v_pp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
                 _by_line('HP',  hp_items)  +
@@ -3096,8 +3366,8 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
                 '  HP WITH JCP;\n'
             )
         },
-        'CFA-M2 (CP_merged+PP+DP+CI, 4F)': {
-            'fname': f'CFA_M2_FourFactor_CP_merged_{ts}',
+        'CFA-F (CP_merged+PP+DP+CI, 4F)': {
+            'fname': f'CFA_F_FourFactor_CP_merged_{ts}',
             'vars_lines': f'{_v_hp}\n{_v_jcp}\n{_v_pp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
                 '  CP  BY ' + '  '.join([i + ('*' if j == 0 else '') for j, i in enumerate(hp_items)]) +
@@ -3107,8 +3377,8 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
                 _by_line('CI', ci_items)
             )
         },
-        'CFA-M3 (CP_merged+DP+CI, 3F)': {
-            'fname': f'CFA_M3_ThreeFactor_CP_DP_CI_{ts}',
+        'CFA-G (CP_merged+DP+CI, 3F)': {
+            'fname': f'CFA_G_ThreeFactor_CP_DP_CI_{ts}',
             'vars_lines': f'{_v_hp}\n{_v_jcp}\n{_v_dp}\n{_v_ci}',
             'model_lines': (
                 '  CP  BY ' + '  '.join([i + ('*' if j == 0 else '') for j, i in enumerate(hp_items)]) +
@@ -3135,270 +3405,521 @@ def run_and_parse_all_models(run_dir, mplus_dat_filename, cfa_dat_filename, ts,
         utf8_path, b5_path = save_inp_dual_encoding(content, run_dir, cfg['fname'])
         cfa_inp_list.append((label, utf8_path))
 
-    # ---- RI-CLPM 模型 A-D ----
+    # ---- CFA-H：跨波次五因子 CFA（HP/JCP/PP@T1，DP@T2，CI@T3）----
+    if cfa_h_dat_filename:
+        _h_vars = f'{_v_hp}\n{_v_jcp}\n{_v_pp}\n{_v_dp}\n{_v_ci}'
+        _h_model = (
+            _by_line('HP',  hp_items)  +
+            _by_line('JCP', jcp_items) +
+            _by_line('PP',  pp_items)  +
+            _by_line('DP',  dp_items)  +
+            _by_line('CI',  ci_items)  +
+            '  HP WITH JCP;\n'
+        )
+        _h_content = (
+            f'TITLE:\n  CFA-H Cross-Wave 五因子 CFA\n'
+            f'  HP/JCP/PP 取 T1；DP 取 T2；CI 取 T3\n'
+            f'  Generated: {ts}\n\n'
+            f'DATA:\n  FILE = "{cfa_h_dat_filename}";\n\n'
+            f'VARIABLE:\n  NAMES =\n{names_block};\n'
+            f'  USEVARIABLES =\n{_h_vars};\n'
+            f'  MISSING =\n{_h_vars} (-999);\n\n'
+            f'ANALYSIS:\n  ESTIMATOR = MLR;\n\n'
+            f'MODEL:\n{_h_model}\n'
+            f'OUTPUT:\n  STDYX;\n  MODINDICES(10);\n  CINTERVAL;\n'
+        )
+        _h_utf8, _ = save_inp_dual_encoding(_h_content, run_dir, f'CFA_H_CrossWave_{ts}')
+        cfa_inp_list.append(('CFA-H (Cross-Wave 5F)', _h_utf8))
+
+        # ---- CFA-I：跨波次四因子 CFA（HP/JCP@T1，DP@T2，CI@T3，不含 PP）----
+        _i_vars = f'{_v_hp}\n{_v_jcp}\n{_v_dp}\n{_v_ci}'
+        _i_model = (
+            _by_line('HP',  hp_items)  +
+            _by_line('JCP', jcp_items) +
+            _by_line('DP',  dp_items)  +
+            _by_line('CI',  ci_items)  +
+            '  HP WITH JCP;\n'
+        )
+        _i_content = (
+            f'TITLE:\n  CFA-I Cross-Wave 四因子 CFA（不含 PP）\n'
+            f'  HP/JCP 取 T1；DP 取 T2；CI 取 T3\n'
+            f'  Generated: {ts}\n\n'
+            f'DATA:\n  FILE = "{cfa_h_dat_filename}";\n\n'
+            f'VARIABLE:\n  NAMES =\n{names_block};\n'
+            f'  USEVARIABLES =\n{_i_vars};\n'
+            f'  MISSING =\n{_i_vars} (-999);\n\n'
+            f'ANALYSIS:\n  ESTIMATOR = MLR;\n\n'
+            f'MODEL:\n{_i_model}\n'
+            f'OUTPUT:\n  STDYX;\n  MODINDICES(10);\n  CINTERVAL;\n'
+        )
+        _i_utf8, _ = save_inp_dual_encoding(_i_content, run_dir, f'CFA_I_CrossWave_4F_{ts}')
+        cfa_inp_list.append(('CFA-I (Cross-Wave 4F, no PP)', _i_utf8))
+
+    # ---- 調節中介路徑模型：PP 調節 JCP/HP(T1) → DP(T2) → CI(T3) ----
     # NAMES 欄位順序（含 PP_group）
     all_var_names = ('HP_T1  JCP_T1  PP_T1  DP_T1  CI_T1\n'
                      '    HP_T2  JCP_T2  PP_T2  DP_T2  CI_T2\n'
                      '    HP_T3  JCP_T3  PP_T3  DP_T3  CI_T3\n'
-                     '    Gender Tenure Position Age PP_group')
+                     '    Gender Age Tenure Position PP_group EXP MAINT EXP_C MAINT_C')
 
-    def make_riclpm_ab(cp, ts, mplus_dat_filename):
+    def make_path_model(ts, mplus_dat_filename):
         """
-        Model A (JCP) / B (HP)：完整雙向六條交叉延遲路徑
-        H1: CP→DP  H2: CP→CI  H3: DP→CI
-        H4: DP→CP  H5: CI→DP  H6: CI→CP
+        完整調節中介路徑分析（Full Moderated Mediation）：
+          PP 同時調節 a-path（JCP/HP->DP）與 b-path（DP->CI）
+          H1a/b: a-path 主效果；H2a/b: a-path 調節；H3: b-path 主效果；
+          H4: b-path 調節；H5a/b: 直接效果；H6a/b: 條件間接效果 (PP ±1SD)
+        ML + Bootstrap 5000; MODEL CONSTRAINT for conditional indirect effects.
         """
-        cpp = cp.lower()
-        use_vars = (f'{cp}_T1  DP_T1  CI_T1\n'
-                    f'    {cp}_T2  DP_T2  CI_T2\n'
-                    f'    {cp}_T3  DP_T3  CI_T3')
         return (
-            f'TITLE:\n  RI-CLPM Model {"A" if cp=="JCP" else "B"} ({cp}->DP->CI, Bidirectional)\n'
+            f'TITLE:\n  Full Moderated Mediation Path Model\n'
+            f'  PP(T1) moderates a-path (JCP/HP->DP) and b-path (DP->CI)\n'
             f'  Generated: {ts}\n\n'
             f'DATA:\n  FILE = "{mplus_dat_filename}";\n\n'
             f'VARIABLE:\n  NAMES =\n    {all_var_names};\n'
-            f'  USEVARIABLES =\n    {use_vars};\n'
+            f'  USEVARIABLES =\n    JCP_T1  HP_T1  PP_T1\n'
+            f'    DP_T2  CI_T3\n'
+            f'    JCP_PP  HP_PP  DP_PP;\n'
             f'  MISSING = ALL(-999);\n\n'
-            f'ANALYSIS:\n  ESTIMATOR = MLR;\n  ITERATIONS = 10000;\n  CONVERGENCE = 0.000001;\n\n'
+            f'DEFINE:\n'
+            f'  CENTER JCP_T1 HP_T1 PP_T1 DP_T2 (GRANDMEAN);\n'
+            f'  JCP_PP = JCP_T1 * PP_T1;\n'
+            f'  HP_PP  = HP_T1  * PP_T1;\n'
+            f'  DP_PP  = DP_T2  * PP_T1;\n\n'
+            f'ANALYSIS:\n  ESTIMATOR = ML;\n  BOOTSTRAP = 5000;\n\n'
             f'MODEL:\n'
-            f'  ! 單一指標\n'
-            f'  {cp}1 BY {cp}_T1@1;  {cp}_T1@0;  {cp}1@0;\n'
-            f'  {cp}2 BY {cp}_T2@1;  {cp}_T2@0;  {cp}2@0;\n'
-            f'  {cp}3 BY {cp}_T3@1;  {cp}_T3@0;  {cp}3@0;\n'
-            f'  DP1 BY DP_T1@1;  DP_T1@0;  DP1@0;\n'
-            f'  DP2 BY DP_T2@1;  DP_T2@0;  DP2@0;\n'
-            f'  DP3 BY DP_T3@1;  DP_T3@0;  DP3@0;\n'
-            f'  CI1 BY CI_T1@1;  CI_T1@0;  CI1@0;\n'
-            f'  CI2 BY CI_T2@1;  CI_T2@0;  CI2@0;\n'
-            f'  CI3 BY CI_T3@1;  CI_T3@0;  CI3@0;\n\n'
-            f'  ! 隨機截距\n'
-            f'  RI_{cp} BY {cp}1@1 {cp}2@1 {cp}3@1;\n'
-            f'  RI_DP   BY DP1@1  DP2@1  DP3@1;\n'
-            f'  RI_CI   BY CI1@1  CI2@1  CI3@1;\n\n'
-            f'  ! Within-person 殘差\n'
-            f'  W{cp}1 BY {cp}1@1;  W{cp}2 BY {cp}2@1;  W{cp}3 BY {cp}3@1;\n'
-            f'  WDP1 BY DP1@1;  WDP2 BY DP2@1;  WDP3 BY DP3@1;\n'
-            f'  WCI1 BY CI1@1;  WCI2 BY CI2@1;  WCI3 BY CI3@1;\n\n'
-            f'  ! 自回歸（跨波等同）\n'
-            f'  W{cp}2 ON W{cp}1 (ar_{cpp});  W{cp}3 ON W{cp}2 (ar_{cpp});\n'
-            f'  WDP2  ON WDP1  (ar_dp);       WDP3  ON WDP2  (ar_dp);\n'
-            f'  WCI2  ON WCI1  (ar_ci);       WCI3  ON WCI2  (ar_ci);\n\n'
-            f'  ! T1 Within-person 共變\n'
-            f'  W{cp}1 WITH WDP1;  W{cp}1 WITH WCI1;  WDP1 WITH WCI1;\n'
-            f'  ! T2/T3 殘差共變\n'
-            f'  W{cp}2 WITH WDP2;  W{cp}2 WITH WCI2;  WDP2 WITH WCI2;\n'
-            f'  W{cp}3 WITH WDP3;  W{cp}3 WITH WCI3;  WDP3 WITH WCI3;\n\n'
-            f'  ! 隨機截距共變\n'
-            f'  RI_{cp} WITH RI_DP;  RI_{cp} WITH RI_CI;  RI_DP WITH RI_CI;\n\n'
-            f'  ! ===== 六條雙向交叉延遲路徑 =====\n'
-            f'  ! H1a/b: {cp} -> DP（正向）\n'
-            f'  WDP2 ON W{cp}1 (cl_{cpp}_dp);  WDP3 ON W{cp}2 (cl_{cpp}_dp);\n'
-            f'  ! H2a/b: {cp} -> CI（正向）\n'
-            f'  WCI2 ON W{cp}1 (cl_{cpp}_ci);  WCI3 ON W{cp}2 (cl_{cpp}_ci);\n'
-            f'  ! H3: DP -> CI（正向）\n'
-            f'  WCI2 ON WDP1  (cl_dp_ci);      WCI3 ON WDP2  (cl_dp_ci);\n'
-            f'  ! H4a/b: DP -> {cp}（正向，反向）\n'
-            f'  W{cp}2 ON WDP1 (cl_dp_{cpp});  W{cp}3 ON WDP2 (cl_dp_{cpp});\n'
-            f'  ! H5: CI -> DP（正向，反向）\n'
-            f'  WDP2 ON WCI1  (cl_ci_dp);      WDP3 ON WCI2  (cl_ci_dp);\n'
-            f'  ! H6a/b: CI -> {cp}（正向，反向）\n'
-            f'  W{cp}2 ON WCI1 (cl_ci_{cpp});  W{cp}3 ON WCI2 (cl_ci_{cpp});\n'
-            f'\nMODEL INDIRECT:\n'
-            f'  ! H7: {cp}(T1)→DP(T2)→CI(T3) 間接效果（DP 中介）\n'
-            f'  WCI3 IND WDP2 W{cpp.upper()}1;\n'
-            f'\nOUTPUT:\n  SAMPSTAT;  STDYX;  MODINDICES(10);  CINTERVAL;\n'
+            f'  ! a-paths: H1a/H1b (at mean PP) + H2a/H2b (PP moderation)\n'
+            f'  DP_T2 ON JCP_T1 (a_jcp)\n'
+            f'           HP_T1  (a_hp)\n'
+            f'           PP_T1  (a_pp)\n'
+            f'           JCP_PP (a_jcp_pp)\n'
+            f'           HP_PP  (a_hp_pp);\n\n'
+            f'  ! b-path: H3 (at mean PP) + H4 (PP moderation of b-path)\n'
+            f'  CI_T3 ON DP_T2  (b_dp)\n'
+            f'           DP_PP  (b_dp_pp);\n'
+            f'  ! direct c-paths: H5a/H5b (at mean PP) + H6a/H6b (PP moderation of c-path)\n'
+            f'  CI_T3 ON JCP_T1 (c_jcp)\n'
+            f'           HP_T1  (c_hp)\n'
+            f'           PP_T1  (c_pp)\n'
+            f'           JCP_PP (c_jcp_pp)\n'
+            f'           HP_PP  (c_hp_pp);\n\n'
+            f'  ! T1 predictor covariances\n'
+            f'  JCP_T1 WITH HP_T1 PP_T1;\n'
+            f'  HP_T1  WITH PP_T1;\n\n'
+            f'MODEL CONSTRAINT:\n'
+            f'  NEW(ind_hi_j ind_lo_j ind_hi_h ind_lo_h\n'
+            f'      dir_hi_j dir_lo_j dir_hi_h dir_lo_h);\n'
+            f'  ! H7a: JCP -> DP -> CI conditional indirect at PP = +1SD / -1SD\n'
+            f'  ind_hi_j = (a_jcp + a_jcp_pp * 1) * (b_dp + b_dp_pp * 1);\n'
+            f'  ind_lo_j = (a_jcp - a_jcp_pp * 1) * (b_dp - b_dp_pp * 1);\n'
+            f'  ! H7b: HP  -> DP -> CI conditional indirect at PP = +1SD / -1SD\n'
+            f'  ind_hi_h = (a_hp  + a_hp_pp  * 1) * (b_dp + b_dp_pp * 1);\n'
+            f'  ind_lo_h = (a_hp  - a_hp_pp  * 1) * (b_dp - b_dp_pp * 1);\n'
+            f'  ! H6a/b supplement: conditional direct effect at PP = +1SD / -1SD\n'
+            f'  dir_hi_j = c_jcp + c_jcp_pp * 1;\n'
+            f'  dir_lo_j = c_jcp - c_jcp_pp * 1;\n'
+            f'  dir_hi_h = c_hp  + c_hp_pp  * 1;\n'
+            f'  dir_lo_h = c_hp  - c_hp_pp  * 1;\n\n'
+            f'OUTPUT:\n  SAMPSTAT;  STDYX;  CINTERVAL(BCBOOTSTRAP);\n'
         )
 
-    def make_riclpm_separate_group(cp, ts, mplus_dat_filename, pp_val, group_label):
+    def make_baseline_mediation_model(ts, mplus_dat_filename):
         """
-        Model C/D subgroup：單一群組 RI-CLPM（High PP 或 Low PP），使用 USEOBSERVATIONS
-        pp_val=1 → HighPP；pp_val=0 → LowPP
-        Configural 多群組無法識別（df<0）→ 改為各組分別跑，比較路徑係數以測試 H8
+        Baseline mediation (no moderation): JCP/HP(T1) -> DP(T2) -> CI(T3)
+        PP as control only. ML + Bootstrap 5000.
         """
-        cpp = cp.lower()
-        model_letter = 'C' if cp == 'JCP' else 'D'
-        grp_short = 'Hi' if pp_val == 1 else 'Lo'
-        use_vars = (f'{cp}_T1  DP_T1  CI_T1\n'
-                    f'    {cp}_T2  DP_T2  CI_T2\n'
-                    f'    {cp}_T3  DP_T3  CI_T3')
         return (
-            f'TITLE:\n  RI-CLPM Model {model_letter} ({cp}, {group_label} PP, H8 test)\n'
+            f'TITLE:\n  Baseline Mediation Model (no moderation)\n'
+            f'  JCP/HP(T1) -> DP(T2) -> CI(T3), PP as control\n'
             f'  Generated: {ts}\n\n'
             f'DATA:\n  FILE = "{mplus_dat_filename}";\n\n'
             f'VARIABLE:\n  NAMES =\n    {all_var_names};\n'
-            f'  USEVARIABLES =\n    {use_vars};\n'
-            f'  USEOBSERVATIONS = PP_group EQ {pp_val};\n'
+            f'  USEVARIABLES =\n    JCP_T1  HP_T1  PP_T1  DP_T2  CI_T3;\n'
             f'  MISSING = ALL(-999);\n\n'
-            f'ANALYSIS:\n  ESTIMATOR = MLR;\n  ITERATIONS = 50000;\n  CONVERGENCE = 0.000001;\n'
-            f'  STARTS = 40;\n\n'
+            f'DEFINE:\n'
+            f'  CENTER JCP_T1 HP_T1 PP_T1 DP_T2 (GRANDMEAN);\n\n'
+            f'ANALYSIS:\n  ESTIMATOR = ML;\n  BOOTSTRAP = 5000;\n\n'
             f'MODEL:\n'
-            f'  ! 單一指標\n'
-            f'  {cp}1 BY {cp}_T1@1;  {cp}_T1@0;  {cp}1@0;\n'
-            f'  {cp}2 BY {cp}_T2@1;  {cp}_T2@0;  {cp}2@0;\n'
-            f'  {cp}3 BY {cp}_T3@1;  {cp}_T3@0;  {cp}3@0;\n'
-            f'  DP1 BY DP_T1@1;  DP_T1@0;  DP1@0;\n'
-            f'  DP2 BY DP_T2@1;  DP_T2@0;  DP2@0;\n'
-            f'  DP3 BY DP_T3@1;  DP_T3@0;  DP3@0;\n'
-            f'  CI1 BY CI_T1@1;  CI_T1@0;  CI1@0;\n'
-            f'  CI2 BY CI_T2@1;  CI_T2@0;  CI2@0;\n'
-            f'  CI3 BY CI_T3@1;  CI_T3@0;  CI3@0;\n\n'
-            f'  ! 隨機截距\n'
-            f'  RI_{cp} BY {cp}1@1 {cp}2@1 {cp}3@1;\n'
-            f'  RI_DP   BY DP1@1  DP2@1  DP3@1;\n'
-            f'  RI_CI   BY CI1@1  CI2@1  CI3@1;\n\n'
-            f'  ! Within-person 殘差\n'
-            f'  W{cp}1 BY {cp}1@1;  W{cp}2 BY {cp}2@1;  W{cp}3 BY {cp}3@1;\n'
-            f'  WDP1 BY DP1@1;  WDP2 BY DP2@1;  WDP3 BY DP3@1;\n'
-            f'  WCI1 BY CI1@1;  WCI2 BY CI2@1;  WCI3 BY CI3@1;\n\n'
-            f'  ! 自回歸（跨波等同）\n'
-            f'  W{cp}2 ON W{cp}1 (ar_{cpp});  W{cp}3 ON W{cp}2 (ar_{cpp});\n'
-            f'  WDP2  ON WDP1  (ar_dp);       WDP3  ON WDP2  (ar_dp);\n'
-            f'  WCI2  ON WCI1  (ar_ci);       WCI3  ON WCI2  (ar_ci);\n\n'
-            f'  ! T1 Within-person 共變\n'
-            f'  W{cp}1 WITH WDP1;  W{cp}1 WITH WCI1;  WDP1 WITH WCI1;\n'
-            f'  ! T2/T3 殘差共變\n'
-            f'  W{cp}2 WITH WDP2;  W{cp}2 WITH WCI2;  WDP2 WITH WCI2;\n'
-            f'  W{cp}3 WITH WDP3;  W{cp}3 WITH WCI3;  WDP3 WITH WCI3;\n\n'
-            f'  ! 隨機截距共變\n'
-            f'  RI_{cp} WITH RI_DP;  RI_{cp} WITH RI_CI;  RI_DP WITH RI_CI;\n\n'
-            f'  ! ===== 六條雙向交叉延遲路徑 =====\n'
-            f'  WDP2 ON W{cp}1 (cl_{cpp}_dp);  WDP3 ON W{cp}2 (cl_{cpp}_dp);\n'
-            f'  WCI2 ON W{cp}1 (cl_{cpp}_ci);  WCI3 ON W{cp}2 (cl_{cpp}_ci);\n'
-            f'  WCI2 ON WDP1  (cl_dp_ci);      WCI3 ON WDP2  (cl_dp_ci);\n'
-            f'  W{cp}2 ON WDP1 (cl_dp_{cpp});  W{cp}3 ON WDP2 (cl_dp_{cpp});\n'
-            f'  WDP2 ON WCI1  (cl_ci_dp);      WDP3 ON WCI2  (cl_ci_dp);\n'
-            f'  W{cp}2 ON WCI1 (cl_ci_{cpp});  W{cp}3 ON WCI2 (cl_ci_{cpp});\n'
-            f'\nOUTPUT:\n  SAMPSTAT;  STDYX;  MODINDICES(10);  CINTERVAL;\n'
+            f'  DP_T2 ON JCP_T1 (a_jcp)\n'
+            f'           HP_T1  (a_hp)\n'
+            f'           PP_T1;\n\n'
+            f'  CI_T3 ON DP_T2  (b_dp)\n'
+            f'           JCP_T1 (c_jcp)\n'
+            f'           HP_T1  (c_hp)\n'
+            f'           PP_T1;\n\n'
+            f'  JCP_T1 WITH HP_T1 PP_T1;\n'
+            f'  HP_T1  WITH PP_T1;\n\n'
+            f'MODEL CONSTRAINT:\n'
+            f'  NEW(ind_jcp ind_hp);\n'
+            f'  ind_jcp = a_jcp * b_dp;\n'
+            f'  ind_hp  = a_hp  * b_dp;\n\n'
+            f'OUTPUT:\n  SAMPSTAT;  STDYX;  CINTERVAL(BCBOOTSTRAP);\n'
         )
 
-    ri_models_spec = [
-        # (label, fname_stem, cp, mtype, pp_val, group_label)
-        ('RI-CLPM-A (JCP, Bidirectional)',  f'RI_CLPM_A_JCP_Bidir_{ts}',    'JCP', 'AB',  None,  None),
-        ('RI-CLPM-B (HP, Bidirectional)',   f'RI_CLPM_B_HP_Bidir_{ts}',     'HP',  'AB',  None,  None),
-        # H8 subgroup models (separate RI-CLPM per PP group)
-        ('RI-CLPM-C1 (JCP, HighPP)',        f'RI_CLPM_C1_JCP_HiPP_{ts}',   'JCP', 'GRP', 1, 'High'),
-        ('RI-CLPM-C2 (JCP, LowPP)',         f'RI_CLPM_C2_JCP_LoPP_{ts}',   'JCP', 'GRP', 0, 'Low'),
-        ('RI-CLPM-D1 (HP, HighPP)',         f'RI_CLPM_D1_HP_HiPP_{ts}',    'HP',  'GRP', 1, 'High'),
-        ('RI-CLPM-D2 (HP, LowPP)',          f'RI_CLPM_D2_HP_LoPP_{ts}',    'HP',  'GRP', 0, 'Low'),
+    def make_nopp_mediation_model(ts, mplus_dat_filename):
+        """純中介路徑（不含 PP）：JCP/HP(T1) → DP(T2) → CI(T3)，Bootstrap 間接效果"""
+        return (
+            f'TITLE:\n  Pure Mediation Model (No PP)\n'
+            f'  JCP/HP(T1) -> DP(T2) -> CI(T3), PP excluded entirely\n'
+            f'  Generated: {ts}\n\n'
+            f'DATA:\n  FILE = "{mplus_dat_filename}";\n\n'
+            f'VARIABLE:\n  NAMES =\n    {all_var_names};\n'
+            f'  USEVARIABLES =\n    JCP_T1  HP_T1  DP_T2  CI_T3;\n'
+            f'  MISSING = ALL(-999);\n\n'
+            f'DEFINE:\n'
+            f'  CENTER JCP_T1 HP_T1 DP_T2 (GRANDMEAN);\n\n'
+            f'ANALYSIS:\n  ESTIMATOR = ML;\n  BOOTSTRAP = 5000;\n\n'
+            f'MODEL:\n'
+            f'  DP_T2 ON JCP_T1 (a_jcp)\n'
+            f'           HP_T1  (a_hp);\n\n'
+            f'  CI_T3 ON DP_T2  (b_dp)\n'
+            f'           JCP_T1 (c_jcp)\n'
+            f'           HP_T1  (c_hp);\n\n'
+            f'  JCP_T1 WITH HP_T1;\n\n'
+            f'MODEL CONSTRAINT:\n'
+            f'  NEW(ind_jcp ind_hp);\n'
+            f'  ind_jcp = a_jcp * b_dp;\n'
+            f'  ind_hp  = a_hp  * b_dp;\n\n'
+            f'OUTPUT:\n  SAMPSTAT;  STDYX;  CINTERVAL(BCBOOTSTRAP);\n'
+        )
+
+    def make_jcp_only_model(ts, mplus_dat_filename):
+        """
+        JCP-only mediation (without HP): test whether JCP has independent effect
+        when HP is removed from the model. ML + Bootstrap 5000.
+        """
+        return (
+            f'TITLE:\n  JCP-only Mediation Model (HP excluded, multicollinearity check)\n'
+            f'  JCP(T1) -> DP(T2) -> CI(T3), PP as control\n'
+            f'  Generated: {ts}\n\n'
+            f'DATA:\n  FILE = "{mplus_dat_filename}";\n\n'
+            f'VARIABLE:\n  NAMES =\n    {all_var_names};\n'
+            f'  USEVARIABLES =\n    JCP_T1  PP_T1  DP_T2  CI_T3;\n'
+            f'  MISSING = ALL(-999);\n\n'
+            f'DEFINE:\n'
+            f'  CENTER JCP_T1 PP_T1 DP_T2 (GRANDMEAN);\n\n'
+            f'ANALYSIS:\n  ESTIMATOR = ML;\n  BOOTSTRAP = 5000;\n\n'
+            f'MODEL:\n'
+            f'  DP_T2 ON JCP_T1 (a_jcp)\n'
+            f'           PP_T1;\n\n'
+            f'  CI_T3 ON DP_T2  (b_dp)\n'
+            f'           JCP_T1 (c_jcp)\n'
+            f'           PP_T1;\n\n'
+            f'  JCP_T1 WITH PP_T1;\n\n'
+            f'MODEL CONSTRAINT:\n'
+            f'  NEW(ind_jcp);\n'
+            f'  ind_jcp = a_jcp * b_dp;\n\n'
+            f'OUTPUT:\n  SAMPSTAT;  STDYX;  CINTERVAL(BCBOOTSTRAP);\n'
+        )
+
+    def make_jcp_pp_model(ts, mplus_dat_filename):
+        """
+        JCP-only moderated mediation: PP moderates both a-path (JCP->DP) and
+        b-path (DP->CI), without HP in the model.
+        Confirms whether the low-PP conditional indirect (JCP->DP->CI) holds
+        independently of HP. ML + Bootstrap 5000.
+        """
+        return (
+            f'TITLE:\n  JCP-only Moderated Mediation (PP moderates a and b paths, no HP)\n'
+            f'  JCP(T1)->DP(T2)->CI(T3), PP(T1) moderator\n'
+            f'  Generated: {ts}\n\n'
+            f'DATA:\n  FILE = "{mplus_dat_filename}";\n\n'
+            f'VARIABLE:\n  NAMES =\n    {all_var_names};\n'
+            f'  USEVARIABLES =\n    JCP_T1  PP_T1  DP_T2  CI_T3\n'
+            f'    JCP_PP  DP_PP;\n'
+            f'  MISSING = ALL(-999);\n\n'
+            f'DEFINE:\n'
+            f'  CENTER JCP_T1 PP_T1 DP_T2 (GRANDMEAN);\n'
+            f'  JCP_PP = JCP_T1 * PP_T1;\n'
+            f'  DP_PP  = DP_T2  * PP_T1;\n\n'
+            f'ANALYSIS:\n  ESTIMATOR = ML;\n  BOOTSTRAP = 5000;\n\n'
+            f'MODEL:\n'
+            f'  ! a-path: JCP->DP, moderated by PP\n'
+            f'  DP_T2 ON JCP_T1 (a_jcp)\n'
+            f'           PP_T1\n'
+            f'           JCP_PP  (a_pp);\n\n'
+            f'  ! b-path + direct c-path: PP also moderates b-path\n'
+            f'  CI_T3 ON DP_T2  (b_dp)\n'
+            f'           JCP_T1 (c_jcp)\n'
+            f'           PP_T1\n'
+            f'           DP_PP  (b_pp);\n\n'
+            f'  JCP_T1 WITH PP_T1;\n\n'
+            f'MODEL CONSTRAINT:\n'
+            f'  NEW(ind_hi ind_lo);\n'
+            f'  ! Conditional indirect at PP +1SD and -1SD\n'
+            f'  ind_hi = (a_jcp + a_pp*1)    * (b_dp + b_pp*1);\n'
+            f'  ind_lo = (a_jcp + a_pp*(-1)) * (b_dp + b_pp*(-1));\n\n'
+            f'OUTPUT:\n  STDYX;  CINTERVAL(BCBOOTSTRAP);\n'
+        )
+
+    def make_career_stage_model(ts, mplus_dat_filename):
+        """
+        Bayesian Path Analysis: Career Stage Moderation of a-path (JCP/HP -> DP)
+        Effects (deviation) coding: EXP_C (+1 for EXP, -0.5 for ESTAB/MAINT)
+                                    MAINT_C (+1 for MAINT, -0.5 for EXP/ESTAB)
+        Each coefficient = that stage vs. the mean of the other two stages.
+        PP retained as control variable only (not moderator).
+        """
+        return (
+            f'TITLE:\n  Career Stage Moderated Path Analysis (Bayesian, effects coding)\n'
+            f'  EXP_C: +1=exploration(21-30) -0.5=others\n'
+            f'  MAINT_C: +1=maintenance(41+) -0.5=others\n'
+            f'  Generated: {ts}\n\n'
+            f'DATA:\n  FILE = "{mplus_dat_filename}";\n\n'
+            f'VARIABLE:\n  NAMES =\n    {all_var_names};\n'
+            f'  USEVARIABLES =\n'
+            f'    JCP_T1  HP_T1  PP_T1  DP_T2  CI_T3\n'
+            f'    EXP_C  MAINT_C\n'
+            f'    JCP_EXC JCP_MNC HP_EXC HP_MNC;\n'
+            f'  MISSING = ALL(-999);\n\n'
+            f'DEFINE:\n'
+            f'  CENTER JCP_T1 HP_T1 DP_T2 (GRANDMEAN);\n'
+            f'  JCP_EXC = JCP_T1 * EXP_C;\n'
+            f'  JCP_MNC = JCP_T1 * MAINT_C;\n'
+            f'  HP_EXC  = HP_T1  * EXP_C;\n'
+            f'  HP_MNC  = HP_T1  * MAINT_C;\n\n'
+            f'ANALYSIS:\n'
+            f'  ESTIMATOR = BAYES;\n'
+            f'  BITERATIONS = (10000);\n'
+            f'  CHAINS = 2;\n'
+            f'  BCONVERGENCE = .05;\n\n'
+            f'MODEL:\n'
+            f'  ! a-path: JCP/HP -> DP, career stage (effects-coded) moderates\n'
+            f'  DP_T2 ON JCP_T1  (a_jcp)\n'
+            f'           HP_T1   (a_hp)\n'
+            f'           PP_T1\n'
+            f'           EXP_C  MAINT_C\n'
+            f'           JCP_EXC (a_jce)\n'
+            f'           JCP_MNC (a_jcm)\n'
+            f'           HP_EXC  (a_hpe)\n'
+            f'           HP_MNC  (a_hpm);\n\n'
+            f'  ! b-path + direct c-path (career stage as control)\n'
+            f'  CI_T3 ON DP_T2  (b_dp)\n'
+            f'           JCP_T1 (c_jcp)\n'
+            f'           HP_T1  (c_hp)\n'
+            f'           PP_T1\n'
+            f'           EXP_C  MAINT_C;\n\n'
+            f'  JCP_T1 WITH HP_T1 PP_T1;\n'
+            f'  HP_T1  WITH PP_T1;\n\n'
+            f'MODEL CONSTRAINT:\n'
+            f'  NEW(ie_e_j ie_m_j ie_r_j\n'
+            f'      ie_e_h ie_m_h ie_r_h);\n'
+            f'  ! Effects coding: EXP_C=+1 for EXP, MAINT_C=+1 for MAINT, both=-0.5 for ESTAB\n'
+            f'  ! Conditional a-path (JCP) per stage = a_jcp + a_jce*EXP_C + a_jcm*MAINT_C\n'
+            f'  ie_e_j = (a_jcp + a_jce*1    + a_jcm*(-0.5)) * b_dp;  ! EXP  vs other-two mean\n'
+            f'  ie_m_j = (a_jcp + a_jce*(-0.5) + a_jcm*1   ) * b_dp;  ! MAINT vs other-two mean\n'
+            f'  ie_r_j = (a_jcp + a_jce*(-0.5) + a_jcm*(-0.5)) * b_dp; ! ESTAB vs other-two mean\n'
+            f'  ! Conditional a-path (HP) per stage = a_hp + a_hpe*EXP_C + a_hpm*MAINT_C\n'
+            f'  ie_e_h = (a_hp  + a_hpe*1    + a_hpm*(-0.5)) * b_dp;  ! EXP\n'
+            f'  ie_m_h = (a_hp  + a_hpe*(-0.5) + a_hpm*1   ) * b_dp;  ! MAINT\n'
+            f'  ie_r_h = (a_hp  + a_hpe*(-0.5) + a_hpm*(-0.5)) * b_dp; ! ESTAB\n\n'
+            f'OUTPUT:\n  STDYX;  CINTERVAL(HPD);\n'
+        )
+
+    # [PP 調節中介已停用] 生成調節中介路徑模型 .inp（保留函式供日後參考，不執行）
+    # _path_fname = f'PATH_ModMed_{ts}'
+    # _path_content = make_path_model(ts, mplus_dat_filename)
+    # _path_utf8, _ = save_inp_dual_encoding(_path_content, run_dir, _path_fname)
+
+    # 生成純中介模型（主模型：JCP/HP(T1)→DP(T2)→CI(T3)，不含 PP）
+    _nopp_fname = f'PATH_NoPP_{ts}'
+    _nopp_content = make_nopp_mediation_model(ts, mplus_dat_filename)
+    _nopp_utf8, _ = save_inp_dual_encoding(_nopp_content, run_dir, _nopp_fname)
+
+    # 生成基礎中介模型（無調節）.inp
+    _base_fname = f'PATH_Baseline_{ts}'
+    _base_content = make_baseline_mediation_model(ts, mplus_dat_filename)
+    _base_utf8, _ = save_inp_dual_encoding(_base_content, run_dir, _base_fname)
+
+    # 生成 JCP-only 模型（排除 HP，multicollinearity 確認）
+    _jcp_fname = f'PATH_JCP_only_{ts}'
+    _jcp_content = make_jcp_only_model(ts, mplus_dat_filename)
+    _jcp_utf8, _ = save_inp_dual_encoding(_jcp_content, run_dir, _jcp_fname)
+
+    # [PP 調節中介已停用] JCP-only + PP 調節模型
+    # _jcp_pp_fname = f'PATH_JCP_PP_{ts}'
+    # _jcp_pp_content = make_jcp_pp_model(ts, mplus_dat_filename)
+    # _jcp_pp_utf8, _ = save_inp_dual_encoding(_jcp_pp_content, run_dir, _jcp_pp_fname)
+
+    # 生成職涯階段 Bayesian 路徑模型 .inp（效果編碼）
+    _cs_fname = f'PATH_CareerStage_{ts}'
+    _cs_content = make_career_stage_model(ts, mplus_dat_filename)
+    _cs_utf8, _ = save_inp_dual_encoding(_cs_content, run_dir, _cs_fname)
+
+    path_inp_list = [
+        ('PATH_NoPP',        _nopp_utf8),
+        ('PATH_Baseline',    _base_utf8),
+        ('PATH_JCP_only',    _jcp_utf8),
+        ('PATH_CareerStage', _cs_utf8),
     ]
 
-    ri_inp_list = []
-    for label, fname, cp, mtype, pp_val, group_label in ri_models_spec:
-        if mtype == 'AB':
-            content = make_riclpm_ab(cp, ts, mplus_dat_filename)
-        else:
-            content = make_riclpm_separate_group(cp, ts, mplus_dat_filename, pp_val, group_label)
-        utf8_path, _ = save_inp_dual_encoding(content, run_dir, fname)
-        ri_inp_list.append((label, utf8_path))
-
     # ---- 自動執行 Mplus ----
-    print("\n[Mplus] 自動執行 CFA 模型 A-D...")
-    cfa_run_results = run_all_mplus(cfa_inp_list, mplus_exe)
+    if 'cfa' in phases:
+        print("\n[Mplus] 自動執行 CFA 模型...")
+        cfa_run_results = run_all_mplus(cfa_inp_list, mplus_exe)
+    else:
+        cfa_run_results = []
 
-    print("[Mplus] 自動執行 RI-CLPM 模型 A-D...")
-    ri_run_results  = run_all_mplus(ri_inp_list, mplus_exe)
+    print("[Mplus] 自動執行縱貫中介路徑模型（JCP/HP(T1)→DP(T2)→CI(T3)）...")
+    path_run_results = run_all_mplus(path_inp_list, mplus_exe)
 
     # ---- 解析 CFA 結果 ----
     for label, ok, out_path, err in cfa_run_results:
         if ok:
             entry = {'fit': parse_mplus_fit(out_path), 'out': out_path}
-            # 擷取所有 CFA 模型的因素負荷量供 Sheet 12 使用
             entry['loadings'] = parse_mplus_cfa_loadings(out_path)
-            # 所有 CFA 模型都計算 AVE / CR（聚合效度）
             entry['ave_cr'] = calculate_ave_cr(out_path)
             all_results[label] = entry
 
-    # ---- 解析 RI-CLPM 結果 ----
-    # Models A/B: 雙向六路徑 + MODEL INDIRECT (H7 中介)
-    # Models C1/C2/D1/D2: 各PP群組分別跑 (H8 比較)
-    _jcp_paths = {
-        'H1a: JCP→DP': ('WDP2', 'WJCP1'),
-        'H2a: JCP→CI': ('WCI2', 'WJCP1'),
-        'H3:  DP→CI':  ('WCI2', 'WDP1'),
-        'H4a: DP→JCP': ('WJCP2', 'WDP1'),
-        'H5:  CI→DP':  ('WDP2', 'WCI1'),
-        'H6a: CI→JCP': ('WJCP2', 'WCI1'),
+    # ---- 解析路徑模型結果 ----
+    _path_map = {
+        'H1a: JCP(T1)→DP(T2) [at mean PP]': ('DP_T2', 'JCP_T1'),
+        'H1b: HP(T1)→DP(T2) [at mean PP]':  ('DP_T2', 'HP_T1'),
+        'H2a: PP×JCP→DP (moderation)':       ('DP_T2', 'JCP_PP'),
+        'H2b: PP×HP→DP (moderation)':        ('DP_T2', 'HP_PP'),
+        'H3:  DP(T2)→CI(T3) [at mean PP]':  ('CI_T3', 'DP_T2'),
+        'H4:  PP×DP→CI (moderation)':        ('CI_T3', 'DP_PP'),
+        'H5a: JCP(T1)→CI(T3) [at mean PP]': ('CI_T3', 'JCP_T1'),
+        'H5b: HP(T1)→CI(T3) [at mean PP]':  ('CI_T3', 'HP_T1'),
+        'H6a: PP×JCP→CI (moderation)':       ('CI_T3', 'JCP_PP'),
+        'H6b: PP×HP→CI (moderation)':        ('CI_T3', 'HP_PP'),
+        'PP→DP (main)':                      ('DP_T2', 'PP_T1'),
+        'PP→CI (main)':                      ('CI_T3', 'PP_T1'),
     }
-    _hp_paths = {
-        'H1b: HP→DP':  ('WDP2', 'WHP1'),
-        'H2b: HP→CI':  ('WCI2', 'WHP1'),
-        'H3:  DP→CI':  ('WCI2', 'WDP1'),
-        'H4b: DP→HP':  ('WHP2', 'WDP1'),
-        'H5:  CI→DP':  ('WDP2', 'WCI1'),
-        'H6b: CI→HP':  ('WHP2', 'WCI1'),
-    }
-    ri_path_maps = {
-        'RI-CLPM-A (JCP, Bidirectional)':  _jcp_paths,
-        'RI-CLPM-B (HP, Bidirectional)':   _hp_paths,
-        'RI-CLPM-C1 (JCP, HighPP)':        _jcp_paths,
-        'RI-CLPM-C2 (JCP, LowPP)':         _jcp_paths,
-        'RI-CLPM-D1 (HP, HighPP)':         _hp_paths,
-        'RI-CLPM-D2 (HP, LowPP)':          _hp_paths,
-    }
-    _jcp_corr = [
-        ('RI_JCP↔RI_DP', 'RI_JCP', 'RI_DP'),
-        ('RI_JCP↔RI_CI', 'RI_JCP', 'RI_CI'),
-        ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')]
-    _hp_corr = [
-        ('RI_HP↔RI_DP',  'RI_HP',  'RI_DP'),
-        ('RI_HP↔RI_CI',  'RI_HP',  'RI_CI'),
-        ('RI_DP↔RI_CI',  'RI_DP',  'RI_CI')]
-    ri_corr_maps = {
-        'RI-CLPM-A (JCP, Bidirectional)':  _jcp_corr,
-        'RI-CLPM-B (HP, Bidirectional)':   _hp_corr,
-        'RI-CLPM-C1 (JCP, HighPP)':        _jcp_corr,
-        'RI-CLPM-C2 (JCP, LowPP)':         _jcp_corr,
-        'RI-CLPM-D1 (HP, HighPP)':         _hp_corr,
-        'RI-CLPM-D2 (HP, LowPP)':          _hp_corr,
-    }
-    # MODEL INDIRECT specs: (label, X, M, Y) — only for Models A and B
-    ri_indirect_maps = {
-        'RI-CLPM-A (JCP, Bidirectional)': [
-            ('H7a: JCP→DP→CI', 'WJCP1', 'WDP2', 'WCI3'),
-        ],
-        'RI-CLPM-B (HP, Bidirectional)': [
-            ('H7b: HP→DP→CI',  'WHP1',  'WDP2', 'WCI3'),
-        ],
-    }
+    _modconstraint_params = [
+        'IND_HI_J', 'IND_LO_J', 'IND_HI_H', 'IND_LO_H',
+        'DIR_HI_J', 'DIR_LO_J', 'DIR_HI_H', 'DIR_LO_H',
+    ]
 
-    for label, ok, out_path, err in ri_run_results:
-        if ok:
-            path_map     = ri_path_maps.get(label, {})
-            corr_pairs   = ri_corr_maps.get(label, [])
-            indir_specs  = ri_indirect_maps.get(label, [])
-            all_results[label] = {
-                'fit':      parse_mplus_fit(out_path),
-                'paths':    parse_mplus_stdyx(out_path, path_map),
-                'ri_corr':  parse_mplus_ri_corr(out_path, corr_pairs),
-                'indirect': parse_mplus_indirect(out_path, indir_specs),
-                'out':      out_path
-            }
+    _nopp_path_map = {
+        'H1a: JCP(T1)→DP(T2)':      ('DP_T2', 'JCP_T1'),
+        'H1b: HP(T1)→DP(T2)':       ('DP_T2', 'HP_T1'),
+        'H2: DP(T2)→CI(T3)':        ('CI_T3', 'DP_T2'),
+        'H3a: JCP(T1)→CI(T3) 直接': ('CI_T3', 'JCP_T1'),
+        'H3b: HP(T1)→CI(T3) 直接':  ('CI_T3', 'HP_T1'),
+    }
+    _nopp_mc_params = ['IND_JCP', 'IND_HP']
 
-    return all_results, cfa_inp_list + ri_inp_list
+    _base_path_map = {
+        'JCP(T1)→DP(T2)':        ('DP_T2', 'JCP_T1'),
+        'HP(T1)→DP(T2)':         ('DP_T2', 'HP_T1'),
+        'PP→DP (控制)':           ('DP_T2', 'PP_T1'),
+        'DP(T2)→CI(T3)':         ('CI_T3', 'DP_T2'),
+        'JCP(T1)→CI(T3) 直接':   ('CI_T3', 'JCP_T1'),
+        'HP(T1)→CI(T3) 直接':    ('CI_T3', 'HP_T1'),
+        'PP→CI (控制)':           ('CI_T3', 'PP_T1'),
+    }
+    _base_mc_params = ['IND_JCP', 'IND_HP']
+
+    _cs_path_map = {
+        'JCP(T1)→DP(T2) [ESTAB均值]':   ('DP_T2', 'JCP_T1'),
+        'HP(T1)→DP(T2) [ESTAB均值]':    ('DP_T2', 'HP_T1'),
+        'JCP×EXP_C→DP (探索期效果)':     ('DP_T2', 'JCP_EXC'),
+        'JCP×MAINT_C→DP (維持期效果)':   ('DP_T2', 'JCP_MNC'),
+        'HP×EXP_C→DP (探索期效果)':      ('DP_T2', 'HP_EXC'),
+        'HP×MAINT_C→DP (維持期效果)':    ('DP_T2', 'HP_MNC'),
+        'DP(T2)→CI(T3)':               ('CI_T3', 'DP_T2'),
+        'JCP(T1)→CI(T3) 直接':          ('CI_T3', 'JCP_T1'),
+        'HP(T1)→CI(T3) 直接':           ('CI_T3', 'HP_T1'),
+        'EXP_C→DP (控制)':              ('DP_T2', 'EXP_C'),
+        'MAINT_C→DP (控制)':            ('DP_T2', 'MAINT_C'),
+        'PP→DP (控制)':                 ('DP_T2', 'PP_T1'),
+    }
+    _cs_mc_params = ['IE_E_J', 'IE_M_J', 'IE_R_J', 'IE_E_H', 'IE_M_H', 'IE_R_H']
+
+    _jcp_path_map = {
+        'JCP(T1)→DP(T2) [JCP-only]': ('DP_T2', 'JCP_T1'),
+        'PP→DP (控制)':               ('DP_T2', 'PP_T1'),
+        'DP(T2)→CI(T3)':             ('CI_T3', 'DP_T2'),
+        'JCP(T1)→CI(T3) 直接':       ('CI_T3', 'JCP_T1'),
+        'PP→CI (控制)':               ('CI_T3', 'PP_T1'),
+    }
+    _jcp_mc_params = ['IND_JCP']
+
+    _jcp_pp_path_map = {
+        'JCP(T1)→DP(T2) [at mean PP]': ('DP_T2', 'JCP_T1'),
+        'JCP×PP→DP (a-path 調節)':      ('DP_T2', 'JCP_PP'),
+        'DP(T2)→CI(T3) [at mean PP]':  ('CI_T3', 'DP_T2'),
+        'DP×PP→CI (b-path 調節)':       ('CI_T3', 'DP_PP'),
+        'JCP(T1)→CI(T3) 直接':         ('CI_T3', 'JCP_T1'),
+        'PP→DP (控制)':                 ('DP_T2', 'PP_T1'),
+        'PP→CI (控制)':                 ('CI_T3', 'PP_T1'),
+    }
+    _jcp_pp_mc_params = ['IND_HI', 'IND_LO']
+
+    for label, ok, out_path, err in path_run_results:
+        if label == 'PATH_NoPP':
+            if ok:
+                all_results[label] = {
+                    'fit':       parse_mplus_fit(out_path),
+                    'paths':     parse_mplus_stdyx(out_path, _nopp_path_map),
+                    'modconstr': parse_mplus_modconstraint(out_path, _nopp_mc_params),
+                    'out':       out_path
+                }
+        elif label == 'PATH (T1→T2→T3)':
+            if ok:
+                all_results[label] = {
+                    'fit':       parse_mplus_fit(out_path),
+                    'paths':     parse_mplus_stdyx(out_path, _path_map),
+                    'modconstr': parse_mplus_modconstraint(out_path, _modconstraint_params),
+                    'out':       out_path
+                }
+        elif label == 'PATH_Baseline':
+            if ok:
+                all_results[label] = {
+                    'fit':       parse_mplus_fit(out_path),
+                    'paths':     parse_mplus_stdyx(out_path, _base_path_map),
+                    'modconstr': parse_mplus_modconstraint(out_path, _base_mc_params),
+                    'out':       out_path
+                }
+        elif label == 'PATH_JCP_only':
+            if ok:
+                all_results[label] = {
+                    'fit':       parse_mplus_fit(out_path),
+                    'paths':     parse_mplus_stdyx(out_path, _jcp_path_map),
+                    'modconstr': parse_mplus_modconstraint(out_path, _jcp_mc_params),
+                    'out':       out_path
+                }
+        elif label == 'PATH_JCP_PP':
+            if ok:
+                all_results[label] = {
+                    'fit':       parse_mplus_fit(out_path),
+                    'paths':     parse_mplus_stdyx(out_path, _jcp_pp_path_map),
+                    'modconstr': parse_mplus_modconstraint(out_path, _jcp_pp_mc_params),
+                    'out':       out_path
+                }
+        elif label == 'PATH_CareerStage':
+            if ok:
+                all_results[label] = {
+                    'fit':       parse_mplus_fit(out_path),
+                    'paths':     parse_mplus_bayes_paths(out_path, _cs_path_map),
+                    'modconstr': parse_mplus_bayes_modconstraint(out_path, _cs_mc_params),
+                    'out':       out_path
+                }
+
+    return all_results, cfa_inp_list + path_inp_list
 
 
 # ==========================================
 # MODULE F: Excel 綜合報告產生
 # ==========================================
 def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_results,
-                          variant_label=None, exclude=None, mi_results=None):
+                          variant_label=None, exclude=None,
+                          clpm_results=None):
     """
     產生 Excel 綜合報告 (Thesis_Results_YYYYMMDD_HHMM.xlsx)，含：
       Sheet 1: 樣本背景變項描述統計
-      Sheet 2: 各量表各波次敘述統計 + 信度 (Cronbach's α)
-      Sheet 3: 相關分析矩陣 (T1)
-      Sheet 4: CFA 適配指數（4 個模型）
-      Sheet 5: RI-CLPM 適配指數（4 個模型）
-      Sheet 6: RI-CLPM Within-person 路徑係數（STDYX）
-      Sheet 7: RI-CLPM Between-person 隨機截距相關
-      Sheet 8: H7 中介間接效果（MODEL INDIRECT，JCP/HP→DP→CI）
-      Sheet 9:  Mplus 語法（所有 .inp 檔內容）
-      Sheet 10: SPSS 語法（SPSS_Syntax + SPSS_Analysis .sps 內容）
-      Sheet 11: 各量表題目 Item-level 描述統計 + 刪題建議
+      Sheet 2: 績效考核分析（三波）
+      Sheet 3: 各量表題目 Item-level 描述統計 + 刪題建議
+      Sheet 4: 各量表各波次敘述統計 + 信度 (Cronbach's α)
+      Sheet 5: 三波段追蹤相關矩陣（完整 15×15，對角線為 α，附 M/SD）
+      Sheet 6: CFA 適配指數 + 因素負荷量 + AVE/CR + 測量不變性（MI）
+      Sheet 7: SPSS 語法（.sps 內容）
+      Sheet 8: Mplus 語法（CFA + MI .inp 內容）
     """
     try:
         import openpyxl
         from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        from openpyxl.utils import get_column_letter
     except ImportError:
         print("  [警告] 未安裝 openpyxl，跳過 Excel 報告。請執行: pip install openpyxl")
         return None
@@ -3469,6 +3990,22 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         cell(ws1, r, 4, '')
         cell(ws1, r, 5, '')
         r += 1
+        # 年齡區間分布（僅 Age 欄）
+        if col_name == 'Age':
+            age_bins = [
+                ('21–30 歲', (s >= 21) & (s <= 30)),
+                ('31–40 歲', (s >= 31) & (s <= 40)),
+                ('41 歲以上', s >= 41),
+            ]
+            for grp_label, mask in age_bins:
+                cnt = int(mask.sum())
+                pct = cnt / n_total * 100 if n_total > 0 else 0
+                cell(ws1, r, 1, '')
+                cell(ws1, r, 2, grp_label, align='left')
+                cell(ws1, r, 3, cnt)
+                cell(ws1, r, 4, f"{pct:.1f}%")
+                cell(ws1, r, 5, '')
+                r += 1
 
     # 類別變項
     cat_vars = [
@@ -3504,8 +4041,8 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
 
     set_widths(ws1, [('A', 18), ('B', 20), ('C', 16), ('D', 10), ('E', 12)])
 
-    # ── Sheet 4: 敘述統計 + 信度（各量表 × 各波次）─────────────────
-    ws2 = wb.create_sheet("4_敘述統計與信度")
+    # ── Sheet 3: 敘述統計 + 信度（各量表 × 各波次）─────────────────
+    ws2 = wb.create_sheet("3_敘述統計與信度")
     title(ws2, f"各量表各波次敘述統計與信度（N = {n_total}，三波配對樣本）", end_col=12)
     r = 3
     hdr_cols = ["量表", "說明", "題數",
@@ -3547,10 +4084,10 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
                  align='left' if ci <= 2 else 'center')
         r += 1
 
-    set_widths(ws2, [('A', 7), ('B', 26), ('C', 5),
-                     ('D', 8), ('E', 8), ('F', 8),
-                     ('G', 8), ('H', 8), ('I', 8),
-                     ('J', 8), ('K', 8), ('L', 8)])
+    set_widths(ws2, [('A', 12), ('B', 30), ('C', 8),
+                     ('D', 11), ('E', 11), ('F', 11),
+                     ('G', 11), ('H', 11), ('I', 11),
+                     ('J', 11), ('K', 11), ('L', 11)])
 
     # ── 相關矩陣 helper（供 T1/T2/T3 各波次共用）─────────────────
     scale_n_items = {'HP': 6, 'JCP': 6, 'CP': 12, 'PP': 6, 'DP': 5, 'CI': 8}
@@ -3640,21 +4177,186 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         set_widths(ws, [('A', 8), ('B', 10), ('C', 10), ('D', 10),
                         ('E', 10), ('F', 10), ('G', 8), ('H', 8)])
 
-    # ── Sheet 6: 相關矩陣 T1 / T2 / T3（每張含次量表＋CP合併兩區塊）──
-    ws3  = wb.create_sheet("6_相關矩陣T1")
-    ws3b = wb.create_sheet("6b_相關矩陣T2")
-    ws3c = wb.create_sheet("6c_相關矩陣T3")
-    make_corr_sheet(ws3,  'T1')
-    make_corr_sheet(ws3b, 'T2')
-    make_corr_sheet(ws3c, 'T3')
+    # ── Sheet 4: 相關矩陣（上：12×12 無PP；下：15×15 完整）──────────────
+    ws_corr = wb.create_sheet("4_相關矩陣")
+
+    # helper：依 _iv_defs 建立合成分數與 α
+    def _build_iv(defs):
+        composites, alphas = [], []
+        for _sn, _wv, _lbl, _ni in defs:
+            _cols = [f'{_sn}{_k}_{_wv}' for _k in range(1, _ni + 1)]
+            _vcols = [c for c in _cols if c in df.columns]
+            if _vcols:
+                _mat = df[_vcols].apply(pd.to_numeric, errors='coerce')
+                composites.append(_mat.mean(axis=1))
+                alphas.append(calculate_cronbach_alpha(_mat.dropna()))
+            else:
+                composites.append(pd.Series([np.nan] * len(df), index=df.index))
+                alphas.append(np.nan)
+        return composites, alphas
+
+    # helper：畫下三角相關矩陣區塊，從 start_row 開始，回傳下一個可用 row
+    def _draw_corr_block(ws, iv_defs, composites, alphas, start_row, title_str, note_str):
+        _n = len(iv_defs)
+        _end_col = _n + 2
+        _wf = {
+            'T1': PatternFill("solid", fgColor="E2EFDA"),
+            'T2': PatternFill("solid", fgColor="DDEBF7"),
+            'T3': PatternFill("solid", fgColor="FCE4D6"),
+        }
+        _r = start_row
+        _tc = ws.cell(row=_r, column=1, value=title_str)
+        _tc.font = Font(bold=True, size=12, color="FFFFFF")
+        _tc.fill = hdr_fill; _tc.alignment = ctr
+        ws.merge_cells(start_row=_r, start_column=1, end_row=_r, end_column=_end_col)
+        _r += 1
+        _nc = ws.cell(row=_r, column=1, value=note_str)
+        _nc.font = Font(italic=True, size=9)
+        ws.merge_cells(start_row=_r, start_column=1, end_row=_r, end_column=_end_col)
+        _r += 1
+        _h0 = ws.cell(row=_r, column=1, value='變數')
+        _h0.font = Font(bold=True, color="FFFFFF", size=10)
+        _h0.fill = hdr_fill; _h0.alignment = ctr; _h0.border = bdr
+        for _jj in range(_n):
+            _hc = ws.cell(row=_r, column=_jj + 2, value=str(_jj + 1))
+            _hc.font = Font(bold=True, color="FFFFFF", size=10)
+            _hc.fill = hdr_fill; _hc.alignment = ctr; _hc.border = bdr
+        _r += 1
+        _data_start = _r
+        for _ii, (_sn, _wv, _lbl, _ni) in enumerate(iv_defs):
+            _row = _data_start + _ii
+            _rc = ws.cell(row=_row, column=1, value=f"({_ii + 1}) {_lbl}")
+            _rc.font = Font(bold=True, size=10)
+            _rc.fill = _wf[_wv]; _rc.alignment = lft; _rc.border = bdr
+            for _jj in range(_n):
+                _col = _jj + 2
+                if _ii == _jj:
+                    _a = alphas[_ii]
+                    _av = f"({_a:.3f})" if not np.isnan(_a) else "(—)"
+                    _cc = ws.cell(row=_row, column=_col, value=_av)
+                    _cc.font = Font(bold=True, size=10)
+                    _cc.fill = _wf[_wv]; _cc.alignment = ctr; _cc.border = bdr
+                elif _ii > _jj:
+                    _vd = pd.concat([composites[_ii], composites[_jj]], axis=1).dropna()
+                    if len(_vd) > 2:
+                        _rv, _pv = stats.pearsonr(_vd.iloc[:, 0], _vd.iloc[:, 1])
+                        _star, _ = fmt_p(_pv)
+                        cell(ws, _row, _col, f"{_rv:.2f}{_star}")
+                    else:
+                        cell(ws, _row, _col, '—')
+                else:
+                    _uc = ws.cell(row=_row, column=_col, value='')
+                    _uc.border = bdr; _uc.alignment = ctr
+        _r = _data_start + _n
+        for _lbl_r in ['M', 'SD']:
+            _lc = ws.cell(row=_r, column=1, value=_lbl_r)
+            _lc.font = Font(bold=True, size=10); _lc.alignment = ctr; _lc.border = bdr
+            for _jj, _comp in enumerate(composites):
+                _col = _jj + 2
+                _v = (_comp.mean() if _lbl_r == 'M' else _comp.std()) if _comp.notna().sum() > 1 else np.nan
+                _vc = ws.cell(row=_r, column=_col,
+                              value=f"{_v:.2f}" if not np.isnan(_v) else '—')
+                _vc.font = Font(size=10); _vc.alignment = ctr; _vc.border = bdr
+            _r += 1
+        _fn = ws.cell(row=_r, column=1,
+            value="對角線括號內為 Cronbach's α；*** p<.001  ** p<.01  * p<.05"
+                  "（下三角為 Pearson 相關係數；成對刪除法處理遺漏值）")
+        _fn.font = Font(italic=True, size=9)
+        ws.merge_cells(start_row=_r, start_column=1, end_row=_r, end_column=_end_col)
+        return _r + 1
+
+    # ── 上半部：表 4A  12×12（HP/JCP/DP/CI × T1~T3，不含 PP）──
+    _iv_defs_12 = [
+        ('HP',  'T1', 'HP（T1）階層停滯',     6),
+        ('JCP', 'T1', 'JCP（T1）工作停滯',    6),
+        ('DP',  'T1', 'DP（T1）決策拖延',     5),
+        ('CI',  'T1', 'CI（T1）職涯無所作為', 8),
+        ('HP',  'T2', 'HP（T2）階層停滯',     6),
+        ('JCP', 'T2', 'JCP（T2）工作停滯',    6),
+        ('DP',  'T2', 'DP（T2）決策拖延',     5),
+        ('CI',  'T2', 'CI（T2）職涯無所作為', 8),
+        ('HP',  'T3', 'HP（T3）階層停滯',     6),
+        ('JCP', 'T3', 'JCP（T3）工作停滯',    6),
+        ('DP',  'T3', 'DP（T3）決策拖延',     5),
+        ('CI',  'T3', 'CI（T3）職涯無所作為', 8),
+    ]
+    _comp_12, _alpha_12 = _build_iv(_iv_defs_12)
+    _next_r = _draw_corr_block(
+        ws_corr, _iv_defs_12, _comp_12, _alpha_12,
+        start_row=1,
+        title_str=f"表 4A  三波段追蹤相關矩陣（12×12，不含 PP）  N={n_total}  *** p<.001  ** p<.01  * p<.05",
+        note_str="對角線（括號內）為 Cronbach's α；HP=階層停滯、JCP=工作停滯、DP=決策拖延、CI=職涯無所作為"
+    )
+
+    _next_r += 1  # 分隔空行
+
+    # ── 下半部：表 4B  15×15（含 PP，完整）──
+    _iv_defs = [
+        ('HP',  'T1', 'HP（T1）階層停滯',     6),
+        ('JCP', 'T1', 'JCP（T1）工作停滯',    6),
+        ('DP',  'T1', 'DP（T1）決策拖延',     5),
+        ('CI',  'T1', 'CI（T1）職涯無所作為', 8),
+        ('PP',  'T1', 'PP（T1）主動型人格',   6),
+        ('HP',  'T2', 'HP（T2）階層停滯',     6),
+        ('JCP', 'T2', 'JCP（T2）工作停滯',    6),
+        ('DP',  'T2', 'DP（T2）決策拖延',     5),
+        ('CI',  'T2', 'CI（T2）職涯無所作為', 8),
+        ('PP',  'T2', 'PP（T2）主動型人格',   6),
+        ('HP',  'T3', 'HP（T3）階層停滯',     6),
+        ('JCP', 'T3', 'JCP（T3）工作停滯',    6),
+        ('DP',  'T3', 'DP（T3）決策拖延',     5),
+        ('CI',  'T3', 'CI（T3）職涯無所作為', 8),
+        ('PP',  'T3', 'PP（T3）主動型人格',   6),
+    ]
+    _n_iv = len(_iv_defs)
+    _iv_composites, _iv_alphas_list = _build_iv(_iv_defs)
+    _next_r = _draw_corr_block(
+        ws_corr, _iv_defs, _iv_composites, _iv_alphas_list,
+        start_row=_next_r,
+        title_str=f"表 4B  三波段追蹤相關矩陣（15×15，含 PP）  N={n_total}  *** p<.001  ** p<.01  * p<.05",
+        note_str="對角線（括號內）為 Cronbach's α；HP=階層停滯、JCP=工作停滯、DP=決策拖延、CI=職涯無所作為、PP=主動型人格"
+    )
+    _corr_note_r = _next_r
+
+    ws_corr.column_dimensions['A'].width = 25
+    for _jj in range(_n_iv):
+        _cl = get_column_letter(_jj + 2)
+        ws_corr.column_dimensions[_cl].width = 7
+
+    # ── 分波次相關矩陣（T1 / T2 / T3，附 M/SD，堆疊於同一 sheet）────────
+    _wave_sep_r = _corr_note_r + 2
+    _wave_sec_hdr = ws_corr.cell(row=_wave_sep_r, column=1,
+        value="各波次同時間點相關矩陣（HP / JCP / DP / CI / PP）")
+    _wave_sec_hdr.font = Font(bold=True, size=11, color="FFFFFF")
+    _wave_sec_hdr.fill = PatternFill("solid", fgColor="2E4057")
+    ws_corr.merge_cells(start_row=_wave_sep_r, start_column=1,
+                        end_row=_wave_sep_r, end_column=9)
+    _wave_sep_r += 1
+    for _wave in ['T1', 'T2', 'T3']:
+        _wblk = ws_corr.cell(row=_wave_sep_r, column=1,
+                             value=f"━━━  {_wave} 相關矩陣  ━━━")
+        _wblk.font = Font(bold=True, size=11, color="FFFFFF")
+        _wblk.fill = PatternFill("solid", fgColor="4472C4")
+        ws_corr.merge_cells(start_row=_wave_sep_r, start_column=1,
+                            end_row=_wave_sep_r, end_column=9)
+        _wave_sep_r += 1
+        _wave_sep_r = make_corr_block(ws_corr, _wave, scale_order_sub,
+                                       f'次量表相關矩陣（{_wave}：HP/JCP/DP/CI/PP）',
+                                       _wave_sep_r)
 
     # ── Sheet 4 & 5: 適配指數（共用內部函式）─────────────────────
     fit_hdr_cols = ["模型", "結構說明", "χ²", "df", "p(χ²)",
                     "CFI", "TLI", "RMSEA", "90% CI", "SRMR", "判斷"]
 
-    def write_fit_sheet(ws, sheet_title, model_info_dict):
-        title(ws, sheet_title, end_col=11)
-        r2 = 3
+    def write_fit_sheet(ws, sheet_title, model_info_dict, start_row=1):
+        if start_row == 1:
+            title(ws, sheet_title, end_col=11)
+        else:
+            _tc = ws.cell(row=start_row, column=1, value=sheet_title)
+            _tc.font = Font(bold=True, size=12)
+            ws.merge_cells(start_row=start_row, start_column=1,
+                           end_row=start_row, end_column=11)
+        r2 = start_row + 2
         for ci, h in enumerate(fit_hdr_cols, 1):
             hdr(ws, r2, ci, h)
         r2 += 1
@@ -3699,25 +4401,28 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
                 value="判斷標準：CFI ≥ .90；RMSEA ≤ .08；SRMR ≤ .08"
                 ).font = Font(italic=True, size=9)
         ws.merge_cells(start_row=r2, start_column=1, end_row=r2, end_column=11)
-        set_widths(ws, [('A', 22), ('B', 24), ('C', 8), ('D', 5), ('E', 8),
-                        ('F', 7), ('G', 7), ('H', 9), ('I', 14), ('J', 7), ('K', 6)])
+        if start_row == 1:
+            set_widths(ws, [('A', 22), ('B', 24), ('C', 8), ('D', 5), ('E', 8),
+                            ('F', 7), ('G', 7), ('H', 9), ('I', 14), ('J', 7), ('K', 6)])
 
-    ws4 = wb.create_sheet("5_CFA適配")
+    ws4 = wb.create_sheet("5_CFA分析")
     write_fit_sheet(ws4, f"CFA 驗證性因素分析適配指數（T1, N = {n_total}）", {
         'CFA-A (JCP+DP+CI)':               ('模型1（CFA-A）', 'JCP + DP + CI（3因子，主路徑 A）'),
         'CFA-B (HP+DP+CI)':                ('模型2（CFA-B）', 'HP + DP + CI（3因子，主路徑 B）'),
         'CFA-C (JCP+PP+DP+CI)':            ('模型3（CFA-C）', 'JCP + PP + DP + CI（4因子）'),
         'CFA-D (HP+PP+DP+CI)':             ('模型4（CFA-D）', 'HP + PP + DP + CI（4因子）'),
-        'CFA-M1 (HP+JCP+PP+DP+CI, 5F)':   ('模型5（CFA-E）', 'HP/JCP/PP/DP/CI 五因子（區別效度基準）'),
-        'CFA-M2 (CP_merged+PP+DP+CI, 4F)': ('模型6（CFA-F）', 'CP合併/PP/DP/CI 四因子（對照 CFA-E）'),
-        'CFA-M3 (CP_merged+DP+CI, 3F)':    ('模型7（CFA-G）', 'CP合併/DP/CI 三因子（最簡對照）'),
+        'CFA-E (HP+JCP+PP+DP+CI, 5F)':   ('模型5（CFA-E）', 'HP/JCP/PP/DP/CI 五因子（區別效度基準，T1）'),
+        'CFA-F (CP_merged+PP+DP+CI, 4F)': ('模型6（CFA-F）', 'CP合併/PP/DP/CI 四因子（對照 CFA-E）'),
+        'CFA-G (CP_merged+DP+CI, 3F)':    ('模型7（CFA-G）', 'CP合併/DP/CI 三因子（最簡對照）'),
+        'CFA-H (Cross-Wave 5F)':           ('模型8（CFA-H）', 'HP/JCP/PP(T1) + DP(T2) + CI(T3) 跨波次五因子'),
+        'CFA-I (Cross-Wave 4F, no PP)':    ('模型9（CFA-I）', 'HP/JCP(T1) + DP(T2) + CI(T3) 跨波次四因子（不含 PP）'),
     })
 
     # ── AVE / CR 聚合效度指標（CFA-E 五因子，附在 CFA適配 表下方）──
     # 找到目前寫入的最後一行
     _ave_r = ws4.max_row + 2
     _ave_title = ws4.cell(row=_ave_r, column=1,
-        value="聚合效度指標（各 CFA 模型，T1）")
+        value="聚合效度指標（各 CFA 模型；CFA-H 為跨波次）")
     _ave_title.font = Font(bold=True, size=11)
     ws4.merge_cells(start_row=_ave_r, start_column=1,
                     end_row=_ave_r, end_column=6)
@@ -3732,14 +4437,15 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         'PP': 'PP 主動型人格', 'DP': 'DP 決策拖延',
         'CI': 'CI 職涯無所作為', 'CP': 'CP 職涯高原（合併）',
     }
+    # 模型6/7 使用 CP parcel 合成分數，僅供區別效度比較，不計算 AVE/CR
     _cfa_ave_models = [
-        ('CFA-A (JCP+DP+CI)',               '模型1（CFA-A）', ['JCP', 'DP', 'CI']),
-        ('CFA-B (HP+DP+CI)',                 '模型2（CFA-B）', ['HP',  'DP', 'CI']),
-        ('CFA-C (JCP+PP+DP+CI)',             '模型3（CFA-C）', ['JCP', 'PP', 'DP', 'CI']),
-        ('CFA-D (HP+PP+DP+CI)',              '模型4（CFA-D）', ['HP',  'PP', 'DP', 'CI']),
-        ('CFA-M1 (HP+JCP+PP+DP+CI, 5F)',    '模型5（CFA-E）', ['HP', 'JCP', 'PP', 'DP', 'CI']),
-        ('CFA-M2 (CP_merged+PP+DP+CI, 4F)', '模型6（CFA-F）', ['CP', 'PP', 'DP', 'CI']),
-        ('CFA-M3 (CP_merged+DP+CI, 3F)',    '模型7（CFA-G）', ['CP', 'DP', 'CI']),
+        ('CFA-A (JCP+DP+CI)',            '模型1（CFA-A）', ['JCP', 'DP', 'CI']),
+        ('CFA-B (HP+DP+CI)',             '模型2（CFA-B）', ['HP',  'DP', 'CI']),
+        ('CFA-C (JCP+PP+DP+CI)',         '模型3（CFA-C）', ['JCP', 'PP', 'DP', 'CI']),
+        ('CFA-D (HP+PP+DP+CI)',          '模型4（CFA-D）', ['HP',  'PP', 'DP', 'CI']),
+        ('CFA-E (HP+JCP+PP+DP+CI, 5F)','模型5（CFA-E）', ['HP', 'JCP', 'PP', 'DP', 'CI']),
+        ('CFA-H (Cross-Wave 5F)',        '模型8（CFA-H）', ['HP', 'JCP', 'PP', 'DP', 'CI']),
+        ('CFA-I (Cross-Wave 4F, no PP)', '模型9（CFA-I）', ['HP', 'JCP', 'DP', 'CI']),
     ]
     for _mkey, _mname, _facs in _cfa_ave_models:
         _ave_cr_data = all_results.get(_mkey, {}).get('ave_cr', {})
@@ -3777,239 +4483,342 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ws4.merge_cells(start_row=_note_r, start_column=1,
                     end_row=_note_r, end_column=6)
 
-    ws5 = wb.create_sheet("8_RICLPM適配")
-    write_fit_sheet(ws5, f"RI-CLPM 適配指數（parcel 合成分數，N = {n_total}）", {
-        'RI-CLPM-A (JCP, Bidirectional)':  'JCP 雙向六路徑（H1a~H6a，含H7a中介）',
-        'RI-CLPM-B (HP, Bidirectional)':   'HP 雙向六路徑（H1b~H6b，含H7b中介）',
-        'RI-CLPM-C1 (JCP, HighPP)':        'JCP 高PP子群（H8a比較組）',
-        'RI-CLPM-C2 (JCP, LowPP)':         'JCP 低PP子群（H8a比較組）',
-        'RI-CLPM-D1 (HP, HighPP)':         'HP 高PP子群（H8b比較組）',
-        'RI-CLPM-D2 (HP, LowPP)':          'HP 低PP子群（H8b比較組）',
-    })
+    # ── Sheet 6: 假設檢驗 ─────────────────────────────────────────
+    ws_hyp = wb.create_sheet("6_假設檢驗")
 
-    # ── 測量不變性（MI）附加區段（置於 RICLPM適配 表下方）──────────
-    _mi_r = ws5.max_row + 2
-    _mi_title = ws5.cell(row=_mi_r, column=1,
-        value="測量不變性（Measurement Invariance）")
-    _mi_title.font = Font(bold=True, size=11)
-    ws5.merge_cells(start_row=_mi_r, start_column=1,
-                    end_row=_mi_r, end_column=9)
-    _mi_r += 1
-    _mi_hdr = ["路徑", "模型", "χ²", "df", "CFI", "RMSEA", "ΔCFI", "ΔRMSEA",
-               "判斷（|ΔCFI|<.01 & |ΔRMSEA|<.015）"]
-    for _ci, _h in enumerate(_mi_hdr, 1):
-        hdr(ws5, _mi_r, _ci, _h)
-    _mi_r += 1
-    _mi_data = mi_results or {}
-    for _mi_path_lbl, _steps in _mi_data.items():
-        _first_mi = True
-        for _step_d in _steps:
-            _chi2_s = f"{_step_d['chi2']:.2f}" if isinstance(_step_d.get('chi2'), float) else '—'
-            _df_s   = str(_step_d['df']) if _step_d.get('df') is not None else '—'
-            _cfi_s  = f"{_step_d['cfi']:.3f}" if isinstance(_step_d.get('cfi'), float) else '—'
-            _rm_s   = f"{_step_d['rmsea']:.3f}" if isinstance(_step_d.get('rmsea'), float) else '—'
-            _dc_s   = f"{_step_d['d_cfi']:.3f}"   if isinstance(_step_d.get('d_cfi'),   float) else '—'
-            _dr_s   = f"{_step_d['d_rmsea']:.3f}" if isinstance(_step_d.get('d_rmsea'), float) else '—'
-            _inv    = _step_d.get('invariant')
-            if _inv is True:
-                _verdict_mi = '✅ 不變性成立'
-                _vcolor     = '006100'
-            elif _inv is False:
-                _verdict_mi = '⚠️ 不變性不成立'
-                _vcolor     = 'C00000'
-            else:
-                _verdict_mi = '（基準/待執行）'
-                _vcolor     = '808080'
-            _mi_vals = [
-                _mi_path_lbl if _first_mi else '',
-                f"{_step_d['step']}：{_step_d['desc']}",
-                _chi2_s, _df_s, _cfi_s, _rm_s, _dc_s, _dr_s, _verdict_mi
-            ]
-            for _ci, _v in enumerate(_mi_vals, 1):
-                cell(ws5, _mi_r, _ci, _v,
-                     bold=(_ci == 9),
-                     color=(_vcolor if _ci == 9 else '000000'),
-                     align='left' if _ci <= 2 else 'center')
-            _first_mi = False
-            _mi_r += 1
-    _mi_note_r = _mi_r
-    ws5.cell(row=_mi_note_r, column=1,
-             value="不變性判斷標準：|ΔCFI| < .01 且 |ΔRMSEA| < .015（Cheung & Rensvold, 2002）"
-             ).font = Font(italic=True, size=9)
-    ws5.merge_cells(start_row=_mi_note_r, start_column=1,
-                    end_row=_mi_note_r, end_column=9)
-    set_widths(ws5, [('A', 22), ('B', 28), ('C', 9), ('D', 5),
-                     ('E', 8), ('F', 9), ('G', 8), ('H', 9), ('I', 26)])
+    def _hyp_ci_fmt(lo, hi):
+        if np.isnan(lo) or np.isnan(hi): return '—'
+        return f"[{lo:.3f}, {hi:.3f}]"
 
-    # ── Sheet 9: RI-CLPM Within-person 路徑係數 ──────────────────
-    ws6 = wb.create_sheet("9_路徑係數")
-    title(ws6, "RI-CLPM Within-person 標準化路徑係數（STDYX，MLR 估計）", end_col=7)
-    r = 3
-    for ci, h in enumerate(
-            ["模型", "路徑", "β（含顯著星號）", "SE", "z值", "p值", "結論"], 1):
-        hdr(ws6, r, ci, h)
-    r += 1
+    def _write_fit_row(ws, row, model_label, res):
+        fit = res.get('fit', {})
+        def _f(k, fmt='.3f'):
+            v = fit.get(k, np.nan)
+            return format(v, fmt) if isinstance(v, float) and not np.isnan(v) else '—'
+        rmsea_lo = fit.get('rmsea_lo', np.nan)
+        rmsea_hi = fit.get('rmsea_hi', np.nan)
+        rmsea_str = (f"{fit.get('rmsea',np.nan):.3f} [{rmsea_lo:.3f}, {rmsea_hi:.3f}]"
+                     if not (np.isnan(rmsea_lo) or np.isnan(rmsea_hi)) else _f('rmsea'))
+        vals = [model_label, _f('chi2','.2f'), _f('df','.0f'),
+                _f('cfi'), _f('tli'), rmsea_str, _f('srmr'),
+                _f('aic','.1f'), _f('bic','.1f'), '']
+        for _fi, _fv in enumerate(vals, 1):
+            _fc = ws.cell(row=row, column=_fi, value=_fv)
+            _fc.font = Font(size=10)
+            _fc.alignment = ctr if _fi > 1 else lft
+            _fc.border = bdr
 
-    ri_model_order = [
-        'RI-CLPM-A (JCP, Bidirectional)',
-        'RI-CLPM-B (HP, Bidirectional)',
-        'RI-CLPM-C1 (JCP, HighPP)',
-        'RI-CLPM-C2 (JCP, LowPP)',
-        'RI-CLPM-D1 (HP, HighPP)',
-        'RI-CLPM-D2 (HP, LowPP)',
-    ]
-    for mkey in ri_model_order:
-        paths = all_results.get(mkey, {}).get('paths', {})
-        if not paths:
-            cell(ws6, r, 1, mkey, bold=True, align='left')
-            cell(ws6, r, 2, '（尚未執行或無法解析，請確認 .out 檔）', align='left')
-            for ci in range(3, 8):
-                cell(ws6, r, ci, '')
-            r += 1
-            continue
-        first = True
-        for path_label, pdata in paths.items():
-            est = pdata.get('est', np.nan)
-            se  = pdata.get('se',  np.nan)
-            z   = pdata.get('z',   np.nan)
-            pv  = pdata.get('p',   np.nan)
-            b_str, p_str = fmt_beta(est, pv)
-            is_sig = isinstance(pv, float) and not np.isnan(pv) and pv < .05
-            cell(ws6, r, 1, mkey if first else '', bold=first, align='left')
-            cell(ws6, r, 2, path_label, align='left')
-            cell(ws6, r, 3, b_str)
-            cell(ws6, r, 4, f"{se:.3f}" if not np.isnan(se) else 'N/A')
-            cell(ws6, r, 5, f"{z:.3f}"  if not np.isnan(z)  else 'N/A')
-            cell(ws6, r, 6, p_str)
-            cell(ws6, r, 7, '顯著 ✅' if is_sig else '不顯著',
-                 color='006100' if is_sig else '000000',
-                 bold=is_sig)
-            first = False
-            r += 1
+    green_fill = PatternFill("solid", fgColor="E2EFDA")
+    red_fill   = PatternFill("solid", fgColor="FFE0E0")
+    _hyp_r = 3
 
-    r += 1
-    ws6.cell(row=r, column=1,
-             value="*** p<.001  ** p<.01  * p<.05（STDYX 標準化；自回歸路徑跨波等同限制）"
-             ).font = Font(italic=True, size=9)
-    ws6.merge_cells(start_row=r, start_column=1, end_row=r, end_column=7)
-    set_widths(ws6, [('A', 28), ('B', 18), ('C', 16),
-                     ('D', 8), ('E', 8), ('F', 10), ('G', 10)])
+    if variant_label == 'nopp':
+        # ── NoPP 版本：純中介模型 H1~H4 ────────────────────────────
+        _nopp_res  = all_results.get('PATH_NoPP', {})
+        title(ws_hyp,
+              f"假設檢驗：純中介分析（不含 PP 調節）H1~H4  N={n_total}"
+              f"  *** p<.001  ** p<.01  * p<.05",
+              end_col=10)
+        ws_hyp.cell(row=2, column=1,
+            value="Mplus ML + Bootstrap 5000（BCBOOTSTRAP CI）；β = 標準化路徑係數；"
+                  "HP=階層停滯、JCP=工作內容停滯、DP=決策拖延、CI=職涯無所作為"
+        ).font = Font(italic=True, size=9)
+        ws_hyp.merge_cells(start_row=2, start_column=1, end_row=2, end_column=10)
 
-    # ── Sheet 7: RI-CLPM Between-person 隨機截距相關 ─────────────
-    ws7 = wb.create_sheet("7_RI相關")
-    # (sheet number 7 unchanged in new ordering)
-    title(ws7, "RI-CLPM Between-person 隨機截距相關（STDYX，95% CI）", end_col=6)
-    r = 3
-    for ci, h in enumerate(
-            ["模型", "變數對", "r 估計值", "95% CI 下限", "95% CI 上限", "顯著（CI不含0）"], 1):
-        hdr(ws7, r, ci, h)
-    r += 1
+        # 適配指數
+        _fit_sec = ws_hyp.cell(row=_hyp_r, column=1, value="路徑模型適配指數（ML Estimator）")
+        _fit_sec.font = Font(bold=True, size=11, color="FFFFFF")
+        _fit_sec.fill = PatternFill("solid", fgColor="2E4057")
+        ws_hyp.merge_cells(start_row=_hyp_r, start_column=1, end_row=_hyp_r, end_column=10)
+        _hyp_r += 1
+        for _fi, _fh in enumerate(["模型", "χ²", "df", "CFI", "TLI",
+                                    "RMSEA [90% CI]", "SRMR", "AIC", "BIC", "備注"], 1):
+            hdr(ws_hyp, _hyp_r, _fi, _fh)
+        _hyp_r += 1
+        _write_fit_row(ws_hyp, _hyp_r,
+                       'PATH_NoPP: JCP/HP(T1)→DP(T2)→CI(T3)', _nopp_res)
+        _hyp_r += 2
 
-    for mkey in ri_model_order:
-        ri_corrs = all_results.get(mkey, {}).get('ri_corr', {})
-        if not ri_corrs:
-            cell(ws7, r, 1, mkey, bold=True, align='left')
-            cell(ws7, r, 2, '（尚未執行或無法解析，請確認 .out 檔）', align='left')
-            for ci in range(3, 7):
-                cell(ws7, r, ci, '')
-            r += 1
-            continue
-        def _fmt_ri(v):
-            """Format RI correlation value; always show number; flag >1 or 999."""
-            if np.isnan(v):
-                return 'N/A'
-            if abs(v) >= 999:
-                return '999.000（Mplus邊界）'
-            return f"{v:.3f}"
+        # 直接路徑 H1~H3
+        _main_sec = ws_hyp.cell(row=_hyp_r, column=1,
+            value="假設檢驗：直接路徑係數（Mplus STDYX 標準化 β）")
+        _main_sec.font = Font(bold=True, size=11, color="FFFFFF")
+        _main_sec.fill = PatternFill("solid", fgColor="4472C4")
+        ws_hyp.merge_cells(start_row=_hyp_r, start_column=1, end_row=_hyp_r, end_column=10)
+        _hyp_r += 1
+        for _ci, _h in enumerate(["假設", "路徑說明", "時間點", "預期方向",
+                                   "IV", "DV", "β", "SE", "95% BC CI", "支持？"], 1):
+            hdr(ws_hyp, _hyp_r, _ci, _h)
+        _hyp_r += 1
 
-        first = True
-        for pair_label, cdata in ri_corrs.items():
-            est   = cdata.get('est',   np.nan)
-            ci_lo = cdata.get('ci_lo', np.nan)
-            ci_hi = cdata.get('ci_hi', np.nan)
-            sig   = cdata.get('sig',   False)
-            boundary = (not np.isnan(est) and abs(est) > 1.0 and abs(est) < 999)
-            cell(ws7, r, 1, mkey if first else '', bold=first, align='left')
-            cell(ws7, r, 2, pair_label, align='left')
-            cell(ws7, r, 3, _fmt_ri(est),   color='C00000' if boundary else '000000')
-            cell(ws7, r, 4, _fmt_ri(ci_lo), color='C00000' if boundary else '000000')
-            cell(ws7, r, 5, _fmt_ri(ci_hi), color='C00000' if boundary else '000000')
-            cell(ws7, r, 6, '是 ✅' if sig else ('⚠ 超邊界' if boundary else '否'),
-                 color=('006100' if sig else ('C00000' if boundary else '000000')),
-                 bold=(sig or boundary))
-            first = False
-            r += 1
+        def _get_nopp_path(path_key):
+            d = _nopp_res.get('paths', {}).get(path_key, {})
+            return (d.get('est', np.nan), d.get('se', np.nan), d.get('p', np.nan),
+                    d.get('ci_lo', np.nan), d.get('ci_hi', np.nan))
 
-    r += 1
-    ws7.cell(row=r, column=1,
-             value="95% CI 不含 0 即顯著；代表穩定的個人間差異關聯（between-person effect）"
-             ).font = Font(italic=True, size=9)
-    ws7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
-    r += 1
-    ws7.cell(row=r, column=1,
-             value="* r 估計值若超出 ±1.000，代表該相關係數超出合理範圍（相關係數理論值介於 -1 到 1 之間）；"
-                   "Mplus 顯示 999.000 表示模型邊界解或估計失敗，常見於子群樣本過小（n < 100）或構念間高度相關，"
-                   "建議與指導老師討論。"
-             ).font = Font(italic=True, size=9, color='C00000')
-    ws7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
-    set_widths(ws7, [('A', 28), ('B', 18), ('C', 10), ('D', 12), ('E', 12), ('F', 14)])
+        _nopp_direct_hyps = [
+            ('H1a', 'JCP（工作內容停滯）→ DP（決策拖延）', 'T1→T2',
+             '+', 'JCP（T1）', 'DP（T2）', 'H1a: JCP(T1)→DP(T2)'),
+            ('H1b', 'HP（階層停滯）→ DP（決策拖延）',      'T1→T2',
+             '+', 'HP（T1）',  'DP（T2）', 'H1b: HP(T1)→DP(T2)'),
+            ('H2',  'DP（決策拖延）→ CI（職涯無所作為）',  'T2→T3',
+             '+', 'DP（T2）',  'CI（T3）', 'H2: DP(T2)→CI(T3)'),
+            ('H3a', 'JCP（工作內容停滯）→ CI（職涯無所作為）直接', 'T1→T3',
+             '+', 'JCP（T1）', 'CI（T3）', 'H3a: JCP(T1)→CI(T3) 直接'),
+            ('H3b', 'HP（階層停滯）→ CI（職涯無所作為）直接',      'T1→T3',
+             '+', 'HP（T1）',  'CI（T3）', 'H3b: HP(T1)→CI(T3) 直接'),
+        ]
+        for _hid, _hdesc, _tpt, _exp_dir, _iv_lbl, _dv_lbl, _pkey in _nopp_direct_hyps:
+            _beta, _se, _pv, _ci_lo, _ci_hi = _get_nopp_path(_pkey)
+            _star, _ = fmt_p(_pv) if not np.isnan(_pv) else ('', '—')
+            _b_str  = f"{_beta:.3f}{_star}" if not np.isnan(_beta) else '待填入'
+            _se_str = f"({_se:.3f})"        if not np.isnan(_se)   else '—'
+            _ci_str = _hyp_ci_fmt(_ci_lo, _ci_hi)
+            _sig    = not np.isnan(_pv) and _pv < .05
+            _dir_ok = ((_exp_dir == '+' and not np.isnan(_beta) and _beta > 0) or
+                       (_exp_dir == '-' and not np.isnan(_beta) and _beta < 0))
+            _support = _sig and _dir_ok
+            _verdict = '支持' if _support else ('不支持' if not np.isnan(_beta) else '待計算')
+            _rfill = green_fill if _support else (red_fill if not np.isnan(_beta) else None)
+            for _ci, _v in enumerate([_hid, _hdesc, _tpt, _exp_dir,
+                                       _iv_lbl, _dv_lbl, _b_str, _se_str,
+                                       _ci_str, _verdict], 1):
+                _c = ws_hyp.cell(row=_hyp_r, column=_ci, value=_v)
+                _c.font = Font(size=10, bold=(_ci == 10 and _support),
+                               color=('006100' if _support
+                                      else ('C00000' if not np.isnan(_beta) and not _support
+                                            else '000000')))
+                _c.alignment = ctr if _ci >= 3 else lft
+                _c.border = bdr
+                if _rfill: _c.fill = _rfill
+            _hyp_r += 1
 
-    # ── Sheet 10: H7 間接效果（MODEL INDIRECT 結果）──────────────
-    ws_h7 = wb.create_sheet("10_H7間接效果")
-    title(ws_h7,
-          "H7 中介效果：CP(T1)→DP(T2)→CI(T3) Within-person 間接效果（STDYX，MLR）",
-          end_col=8)
-    r = 3
-    for ci, h in enumerate(
-            ["模型", "路徑", "β_indirect", "SE", "z值", "p值", "95% CI", "結論"], 1):
-        hdr(ws_h7, r, ci, h)
-    r += 1
+        # 間接效果 H4
+        _hyp_r += 1
+        _h4_sec = ws_hyp.cell(row=_hyp_r, column=1,
+            value="H4 間接效果：JCP/HP(T1)→DP(T2)→CI(T3)"
+                  "（Mplus MODEL CONSTRAINT，BC Bootstrap 95% CI）")
+        _h4_sec.font = Font(bold=True, size=11, color="FFFFFF")
+        _h4_sec.fill = PatternFill("solid", fgColor="2E4057")
+        ws_hyp.merge_cells(start_row=_hyp_r, start_column=1, end_row=_hyp_r, end_column=10)
+        _hyp_r += 1
+        for _ci, _h in enumerate(["假設", "路徑說明", "—",
+                                   "IV", "DV", "β (indirect)", "SE", "95% BC CI", "顯著？", "—"], 1):
+            hdr(ws_hyp, _hyp_r, _ci, _h)
+        _hyp_r += 1
+        _nopp_mc_res = _nopp_res.get('modconstr', {})
+        for _hid4, _path_lbl, _iv4, _dv4, _mc_key in [
+            ('H4a', 'JCP(T1)→DP(T2)→CI(T3)', 'JCP（T1）', 'CI（T3）', 'IND_JCP'),
+            ('H4b', 'HP(T1)→DP(T2)→CI(T3)',  'HP（T1）',  'CI（T3）', 'IND_HP'),
+        ]:
+            _mc4 = _nopp_mc_res.get(_mc_key, {})
+            _ie    = _mc4.get('est', np.nan)
+            _ie_se = _mc4.get('se',  np.nan)
+            _ie_lo = _mc4.get('ci_lo', np.nan)
+            _ie_hi = _mc4.get('ci_hi', np.nan)
+            _ie_sig = _mc4.get('sig', False)
+            for _ci, _v in enumerate([
+                _hid4, _path_lbl, '—', _iv4, _dv4,
+                f"{_ie:.3f}"      if not np.isnan(_ie)    else '待填入',
+                f"({_ie_se:.3f})" if not np.isnan(_ie_se) else '—',
+                _hyp_ci_fmt(_ie_lo, _ie_hi),
+                '顯著' if _ie_sig else ('不顯著' if not np.isnan(_ie) else '—'),
+                '',
+            ], 1):
+                _hc = ws_hyp.cell(row=_hyp_r, column=_ci, value=_v)
+                _hc.font = Font(size=10, bold=(_ci == 9 and _ie_sig),
+                                color='006100' if _ie_sig else '000000')
+                _hc.alignment = ctr if _ci >= 2 else lft
+                _hc.border = bdr
+                if _ie_sig: _hc.fill = green_fill
+            _hyp_r += 1
 
-    for mkey in ['RI-CLPM-A (JCP, Bidirectional)', 'RI-CLPM-B (HP, Bidirectional)']:
-        indir = all_results.get(mkey, {}).get('indirect', {})
-        if not indir:
-            cell(ws_h7, r, 1, mkey, bold=True, align='left')
-            cell(ws_h7, r, 2, '（尚未執行或 MODEL INDIRECT 未解析，請確認 .out 檔）',
-                 align='left')
-            for ci in range(3, 9):
-                cell(ws_h7, r, ci, '')
-            r += 1
-            continue
-        first = True
-        for path_label, idata in indir.items():
-            est   = idata.get('est',   np.nan)
-            se    = idata.get('se',    np.nan)
-            z     = idata.get('z',     np.nan)
-            pv    = idata.get('p',     np.nan)
-            ci_lo = idata.get('ci_lo', np.nan)
-            ci_hi = idata.get('ci_hi', np.nan)
-            sig   = idata.get('sig',   False)
-            p_str = (f"{pv:.3f}" if not np.isnan(pv) else 'N/A')
-            ci_str = (f"[{ci_lo:.3f}, {ci_hi:.3f}]"
-                      if not (np.isnan(ci_lo) or np.isnan(ci_hi)) else 'N/A')
-            cell(ws_h7, r, 1, mkey if first else '', bold=first, align='left')
-            cell(ws_h7, r, 2, path_label, align='left')
-            cell(ws_h7, r, 3, f"{est:.3f}*" if sig and not np.isnan(est)
-                 else (f"{est:.3f}" if not np.isnan(est) else 'N/A'))
-            cell(ws_h7, r, 4, f"{se:.3f}"  if not np.isnan(se) else 'N/A')
-            cell(ws_h7, r, 5, f"{z:.3f}"   if not np.isnan(z)  else 'N/A')
-            cell(ws_h7, r, 6, p_str)
-            cell(ws_h7, r, 7, ci_str)
-            cell(ws_h7, r, 8, '顯著 ✅' if sig else '不顯著',
-                 color='006100' if sig else '000000', bold=sig)
-            first = False
-            r += 1
+    else:
+        # ── WithPP 版本：完整調節中介 H1~H7 ───────────────────────
+        _PATH_KEY = 'PATH (T1→T2→T3)'
+        _path_res  = all_results.get(_PATH_KEY, {})
+        title(ws_hyp,
+              f"假設檢驗：完整調節中介分析  PP(T1)調節 a/b/c' 三條路徑  H1~H7  N={n_total}"
+              f"  *** p<.001  ** p<.01  * p<.05",
+              end_col=10)
+        ws_hyp.cell(row=2, column=1,
+            value="Mplus ML + Bootstrap 5000（BCBOOTSTRAP CI）；β = 標準化路徑係數；"
+                  "HP=階層停滯、JCP=工作內容停滯、DP=決策拖延、CI=職涯無所作為、PP=主動型人格（調節變項）"
+        ).font = Font(italic=True, size=9)
+        ws_hyp.merge_cells(start_row=2, start_column=1, end_row=2, end_column=10)
 
-    r += 1
-    ws_h7.cell(row=r, column=1,
-               value="* p<.05；間接效果 = β(CP→DP) × β(DP→CI)；95% CI 不含 0 即顯著"
-               ).font = Font(italic=True, size=9)
-    ws_h7.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
-    set_widths(ws_h7, [('A', 28), ('B', 22), ('C', 14), ('D', 8),
-                       ('E', 8), ('F', 10), ('G', 18), ('H', 10)])
+        # 路徑模型適配指數
+        _fit_sec = ws_hyp.cell(row=_hyp_r, column=1,
+            value="路徑模型適配指數（ML Estimator）")
+        _fit_sec.font = Font(bold=True, size=11, color="FFFFFF")
+        _fit_sec.fill = PatternFill("solid", fgColor="2E4057")
+        ws_hyp.merge_cells(start_row=_hyp_r, start_column=1, end_row=_hyp_r, end_column=10)
+        _hyp_r += 1
+        for _fi, _fh in enumerate(["模型", "χ²", "df", "CFI", "TLI",
+                                    "RMSEA [90% CI]", "SRMR", "AIC", "BIC", "備注"], 1):
+            hdr(ws_hyp, _hyp_r, _fi, _fh)
+        _hyp_r += 1
+        _write_fit_row(ws_hyp, _hyp_r,
+                       'PATH: T1(JCP/HP/PP)→T2(DP)→T3(CI)', _path_res)
+        _hyp_r += 2
 
-    # ── Sheet 12: Mplus 語法（.inp 內容）────────────────────────
-    ws8 = wb.create_sheet("12_Mplus語法")
+        # 假設主表（直接效果 H1/H2/H3/H4/H5/H6）
+        _main_sec = ws_hyp.cell(row=_hyp_r, column=1,
+            value="假設檢驗：直接路徑係數（Mplus STDYX 標準化 β）")
+        _main_sec.font = Font(bold=True, size=11, color="FFFFFF")
+        _main_sec.fill = PatternFill("solid", fgColor="4472C4")
+        ws_hyp.merge_cells(start_row=_hyp_r, start_column=1, end_row=_hyp_r, end_column=10)
+        _hyp_r += 1
+        for _ci, _h in enumerate(["假設", "路徑說明", "時間點", "預期方向",
+                                   "IV", "DV", "β", "SE", "95% BC CI", "支持？"], 1):
+            hdr(ws_hyp, _hyp_r, _ci, _h)
+        _hyp_r += 1
+
+        def _get_path(path_key):
+            d = _path_res.get('paths', {}).get(path_key, {})
+            return (d.get('est', np.nan), d.get('se', np.nan), d.get('p', np.nan),
+                    d.get('ci_lo', np.nan), d.get('ci_hi', np.nan))
+
+        def _var_label(sn, wv):
+            return next((l for s, w, l, n in _iv_defs if s == sn and w == wv), f'{sn}_{wv}')
+
+        _direct_hyps = [
+            ('H1a', 'JCP（工作內容停滯）→ DP（決策拖延）[at mean PP]', 'T1→T2',
+             '+', 'JCP（T1）',    'DP（T2）', 'H1a: JCP(T1)→DP(T2) [at mean PP]'),
+            ('H1b', 'HP（階層停滯）→ DP（決策拖延）[at mean PP]',      'T1→T2',
+             '+', 'HP（T1）',     'DP（T2）', 'H1b: HP(T1)→DP(T2) [at mean PP]'),
+            ('H2a', 'PP 調節 JCP→DP（PP×JCP 交互）',  'T1×T1→T2',
+             '-', 'PP×JCP（T1）', 'DP（T2）', 'H2a: PP×JCP→DP (moderation)'),
+            ('H2b', 'PP 調節 HP→DP（PP×HP 交互）',    'T1×T1→T2',
+             '-', 'PP×HP（T1）',  'DP（T2）', 'H2b: PP×HP→DP (moderation)'),
+            ('H3',  'DP（決策拖延）→ CI（職涯無所作為）[at mean PP]', 'T2→T3',
+             '+', 'DP（T2）',     'CI（T3）', 'H3:  DP(T2)→CI(T3) [at mean PP]'),
+            ('H4',  'PP 調節 DP→CI（PP×DP 交互）',    'T2×T1→T3',
+             '-', 'PP×DP（T1/T2）', 'CI（T3）', 'H4:  PP×DP→CI (moderation)'),
+            ('H5a', 'JCP（工作內容停滯）→ CI（職涯無所作為）直接效果 [at mean PP]', 'T1→T3',
+             '+', 'JCP（T1）',    'CI（T3）', 'H5a: JCP(T1)→CI(T3) [at mean PP]'),
+            ('H5b', 'HP（階層停滯）→ CI（職涯無所作為）直接效果 [at mean PP]',      'T1→T3',
+             '+', 'HP（T1）',     'CI（T3）', 'H5b: HP(T1)→CI(T3) [at mean PP]'),
+            ('H6a', 'PP 調節 JCP→CI 直接效果（PP×JCP 交互）',  'T1×T1→T3',
+             '-', 'PP×JCP（T1）', 'CI（T3）', 'H6a: PP×JCP→CI (moderation)'),
+            ('H6b', 'PP 調節 HP→CI 直接效果（PP×HP 交互）',    'T1×T1→T3',
+             '-', 'PP×HP（T1）',  'CI（T3）', 'H6b: PP×HP→CI (moderation)'),
+        ]
+        for _hid, _hdesc, _tpt, _exp_dir, _iv_lbl, _dv_lbl, _pkey in _direct_hyps:
+            _beta, _se, _pv, _ci_lo, _ci_hi = _get_path(_pkey)
+            _star, _p_str = fmt_p(_pv) if not np.isnan(_pv) else ('', '—')
+            _b_str    = f"{_beta:.3f}{_star}" if not np.isnan(_beta) else '待填入'
+            _se_str   = f"({_se:.3f})"        if not np.isnan(_se)   else '—'
+            _ci_str   = _hyp_ci_fmt(_ci_lo, _ci_hi)
+            _sig    = not np.isnan(_pv) and _pv < .05
+            _dir_ok = ((_exp_dir == '+' and not np.isnan(_beta) and _beta > 0) or
+                       (_exp_dir == '-' and not np.isnan(_beta) and _beta < 0))
+            _support = _sig and _dir_ok
+            _verdict = '支持' if _support else ('不支持' if not np.isnan(_beta) else '待計算')
+            _rfill = green_fill if _support else (red_fill if not np.isnan(_beta) else None)
+            for _ci, _v in enumerate([_hid, _hdesc, _tpt, _exp_dir,
+                                       _iv_lbl, _dv_lbl, _b_str, _se_str,
+                                       _ci_str, _verdict], 1):
+                _c = ws_hyp.cell(row=_hyp_r, column=_ci, value=_v)
+                _c.font = Font(size=10,
+                               bold=(_ci == 10 and _support),
+                               color=('006100' if _support
+                                      else ('C00000' if not np.isnan(_beta) and not _support
+                                            else '000000')))
+                _c.alignment = ctr if _ci >= 3 else lft
+                _c.border = bdr
+                if _rfill: _c.fill = _rfill
+            _hyp_r += 1
+
+        # H6 條件直接效果
+        _hyp_r += 1
+        _h6_sec = ws_hyp.cell(row=_hyp_r, column=1,
+            value="H6 條件直接效果：JCP/HP(T1)→CI(T3)，PP = ±1SD（c'-path 隨 PP 水準變化）"
+                  "（Mplus MODEL CONSTRAINT，BC Bootstrap 95% CI）")
+        _h6_sec.font = Font(bold=True, size=11, color="FFFFFF")
+        _h6_sec.fill = PatternFill("solid", fgColor="375623")
+        ws_hyp.merge_cells(start_row=_hyp_r, start_column=1, end_row=_hyp_r, end_column=10)
+        _hyp_r += 1
+        for _ci, _h in enumerate(["假設", "路徑說明", "PP 水準",
+                                   "IV", "DV", "β (direct)", "SE", "95% BC CI", "顯著？", "—"], 1):
+            hdr(ws_hyp, _hyp_r, _ci, _h)
+        _hyp_r += 1
+        _mc_res = _path_res.get('modconstr', {})
+        for _hid6, _path_lbl, _pp_lbl, _iv6, _dv6, _mc_key in [
+            ('H6a', 'JCP(T1)→CI(T3) 直接', 'PP +1SD（主動型人格高）', 'JCP（T1）', 'CI（T3）', 'DIR_HI_J'),
+            ('H6a', 'JCP(T1)→CI(T3) 直接', 'PP -1SD（主動型人格低）', 'JCP（T1）', 'CI（T3）', 'DIR_LO_J'),
+            ('H6b', 'HP(T1)→CI(T3) 直接',  'PP +1SD（主動型人格高）', 'HP（T1）',  'CI（T3）', 'DIR_HI_H'),
+            ('H6b', 'HP(T1)→CI(T3) 直接',  'PP -1SD（主動型人格低）', 'HP（T1）',  'CI（T3）', 'DIR_LO_H'),
+        ]:
+            _mc6 = _mc_res.get(_mc_key, {})
+            _de    = _mc6.get('est', np.nan)
+            _de_se = _mc6.get('se',  np.nan)
+            _de_lo = _mc6.get('ci_lo', np.nan)
+            _de_hi = _mc6.get('ci_hi', np.nan)
+            _de_sig = _mc6.get('sig', False)
+            for _ci, _v in enumerate([
+                _hid6, _path_lbl, _pp_lbl, _iv6, _dv6,
+                f"{_de:.3f}"      if not np.isnan(_de)    else '待填入',
+                f"({_de_se:.3f})" if not np.isnan(_de_se) else '—',
+                _hyp_ci_fmt(_de_lo, _de_hi),
+                '顯著' if _de_sig else ('不顯著' if not np.isnan(_de) else '—'),
+                '',
+            ], 1):
+                _hc = ws_hyp.cell(row=_hyp_r, column=_ci, value=_v)
+                _hc.font = Font(size=10, bold=(_ci == 9 and _de_sig),
+                                color='006100' if _de_sig else '000000')
+                _hc.alignment = ctr if _ci >= 2 else lft
+                _hc.border = bdr
+                if _de_sig: _hc.fill = green_fill
+            _hyp_r += 1
+
+        # H7 條件間接效果
+        _hyp_r += 1
+        _h7_sec = ws_hyp.cell(row=_hyp_r, column=1,
+            value="H7 條件間接效果：CP(T1)→DP(T2)→CI(T3)，PP = ±1SD（a-path＋b-path 均條件化）"
+                  "（Mplus MODEL CONSTRAINT，BC Bootstrap 95% CI）")
+        _h7_sec.font = Font(bold=True, size=11, color="FFFFFF")
+        _h7_sec.fill = PatternFill("solid", fgColor="2E4057")
+        ws_hyp.merge_cells(start_row=_hyp_r, start_column=1, end_row=_hyp_r, end_column=10)
+        _hyp_r += 1
+        for _ci, _h in enumerate(["假設", "路徑說明", "PP 水準",
+                                   "IV", "DV", "β (indirect)", "SE", "95% BC CI", "顯著？", "—"], 1):
+            hdr(ws_hyp, _hyp_r, _ci, _h)
+        _hyp_r += 1
+        for _hid7, _path_lbl, _pp_lbl, _iv7, _dv7, _mc_key in [
+            ('H7a', 'JCP(T1)→DP(T2)→CI(T3)', 'PP +1SD（主動型人格高）', 'JCP（T1）', 'CI（T3）', 'IND_HI_J'),
+            ('H7a', 'JCP(T1)→DP(T2)→CI(T3)', 'PP -1SD（主動型人格低）', 'JCP（T1）', 'CI（T3）', 'IND_LO_J'),
+            ('H7b', 'HP(T1)→DP(T2)→CI(T3)',  'PP +1SD（主動型人格高）', 'HP（T1）',  'CI（T3）', 'IND_HI_H'),
+            ('H7b', 'HP(T1)→DP(T2)→CI(T3)',  'PP -1SD（主動型人格低）', 'HP（T1）',  'CI（T3）', 'IND_LO_H'),
+        ]:
+            _mc7 = _mc_res.get(_mc_key, {})
+            _ie    = _mc7.get('est', np.nan)
+            _ie_se = _mc7.get('se',  np.nan)
+            _ie_lo = _mc7.get('ci_lo', np.nan)
+            _ie_hi = _mc7.get('ci_hi', np.nan)
+            _ie_sig = _mc7.get('sig', False)
+            for _ci, _v in enumerate([
+                _hid7, _path_lbl, _pp_lbl, _iv7, _dv7,
+                f"{_ie:.3f}"      if not np.isnan(_ie)    else '待填入',
+                f"({_ie_se:.3f})" if not np.isnan(_ie_se) else '—',
+                _hyp_ci_fmt(_ie_lo, _ie_hi),
+                '顯著' if _ie_sig else ('不顯著' if not np.isnan(_ie) else '—'),
+                '',
+            ], 1):
+                _hc = ws_hyp.cell(row=_hyp_r, column=_ci, value=_v)
+                _hc.font = Font(size=10, bold=(_ci == 9 and _ie_sig),
+                                color='006100' if _ie_sig else '000000')
+                _hc.alignment = ctr if _ci >= 2 else lft
+                _hc.border = bdr
+                if _ie_sig: _hc.fill = green_fill
+            _hyp_r += 1
+
+    set_widths(ws_hyp, [('A', 10), ('B', 40), ('C', 30), ('D', 16),
+                        ('E', 18), ('F', 18), ('G', 10), ('H', 18),
+                        ('I', 16), ('J', 10)])
+
+    # ── Sheet 9: Mplus 語法（.inp 內容）── 語法附錄，最後 ────────
+    ws8 = wb.create_sheet("9_Mplus語法")
     ws8.cell(row=1, column=1,
              value="Mplus 分析語法（.inp）— 可直接複製至 Mplus 執行"
              ).font = Font(bold=True, size=12)
@@ -4021,37 +4830,28 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     ws8.column_dimensions['B'].width = 40
     ws8.column_dimensions['C'].width = 80
 
-    # 模型名稱對照表（檔名 → 表 4 中文標題）
+    # 模型名稱對照表（檔名 → 中文標題）
     MPLUS_MODEL_NAME_MAP = {
         'CFA A JCP DP CI':               '模型1（CFA-A）：JCP + DP + CI',
         'CFA B HP DP CI':                '模型2（CFA-B）：HP + DP + CI',
         'CFA C JCP PP DP CI':            '模型3（CFA-C）：JCP + PP + DP + CI',
         'CFA D HP PP DP CI':             '模型4（CFA-D）：HP + PP + DP + CI',
-        'CFA M1 FiveFactor':             '模型5（CFA-E）：HP/JCP/PP/DP/CI 五因子',
-        'CFA M2 FourFactor CP merged':   '模型6（CFA-F）：CP合併/PP/DP/CI 四因子',
-        'CFA M3 ThreeFactor CP DP CI':   '模型7（CFA-G）：CP合併/DP/CI 三因子',
-        'RI CLPM A JCP Bidir':           'RI-CLPM A：JCP 雙向（H1a–H6a, H7a）',
-        'RI CLPM B HP Bidir':            'RI-CLPM B：HP 雙向（H1b–H6b, H7b）',
-        'RI CLPM C1 JCP HiPP':           'RI-CLPM C1：JCP 高PP子群（H8a）',
-        'RI CLPM C2 JCP LoPP':           'RI-CLPM C2：JCP 低PP子群（H8a）',
-        'RI CLPM D1 HP HiPP':            'RI-CLPM D1：HP 高PP子群（H8b）',
-        'RI CLPM D2 HP LoPP':            'RI-CLPM D2：HP 低PP子群（H8b）',
-        'RI CLPM Step1 CP DP CI':        'RI-CLPM Step1：CP→DP→CI 主路徑',
-        'RI CLPM Step2 Add PP':          'RI-CLPM Step2：加入PP（H8）',
-        'RI CLPM Step3 Controls':        'RI-CLPM Step3：加入控制變數',
-        'MI Configural Template':        '測量不變性模板',
-        'MI A JCP DP CI Step1 Configural': 'MI-A Step1：組態不變性（JCP路徑）',
-        'MI A JCP DP CI Step2 Metric':     'MI-A Step2：負荷不變性（JCP路徑）',
-        'MI A JCP DP CI Step3 Scalar':     'MI-A Step3：截距不變性（JCP路徑）',
-        'MI B HP DP CI Step1 Configural':  'MI-B Step1：組態不變性（HP路徑）',
-        'MI B HP DP CI Step2 Metric':      'MI-B Step2：負荷不變性（HP路徑）',
-        'MI B HP DP CI Step3 Scalar':      'MI-B Step3：截距不變性（HP路徑）',
+        'CFA E FiveFactor':              '模型5（CFA-E）：HP/JCP/PP/DP/CI 五因子',
+        'CFA F FourFactor CP merged':    '模型6（CFA-F）：CP合併/PP/DP/CI 四因子',
+        'CFA G ThreeFactor CP DP CI':    '模型7（CFA-G）：CP合併/DP/CI 三因子',
+        'PATH ModMed':                      '調節中介路徑模型：PP(T1)調節 JCP/HP(T1)→DP(T2)→CI(T3)',
     }
 
-    # 掃 run_dir 下所有 .inp（排除 _b5 備用版）
+    # 掃 run_dir 下所有 .inp（順序：CFA → MI → PATH → 其他）
+    def _mplus_sort_key(fn):
+        if fn.startswith('CFA_'):   return (0, fn)
+        elif fn.startswith('MI_'):  return (1, fn)
+        elif fn.startswith('PATH_'): return (2, fn)
+        else:                       return (3, fn)
+
     all_inp_paths = []
-    for fname in sorted(os.listdir(run_dir)):
-        if fname.endswith('.inp') and not fname.endswith('_b5.inp'):
+    for fname in sorted(os.listdir(run_dir), key=_mplus_sort_key):
+        if fname.endswith('.inp'):
             raw_lbl = fname.replace(f'_{ts}.inp', '').replace('_', ' ').replace('-', ' ')
             lbl = MPLUS_MODEL_NAME_MAP.get(raw_lbl, raw_lbl)
             all_inp_paths.append((lbl, os.path.join(run_dir, fname)))
@@ -4113,8 +4913,342 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         var_total = data.sum(axis=1).var(ddof=1)
         return round((k / (k - 1)) * (1 - var_sum / var_total), 3) if var_total > 0 else np.nan
 
-    # ── Sheet 11: SPSS 語法（.sps 內容）────────────────────────────
-    ws_spss = wb.create_sheet("11_SPSS語法")
+    # ── Sheet 7: 職涯階段補充分析（Bayesian Path）────────────────────
+    ws_cs = wb.create_sheet("7_職涯階段分析")
+    _BASE_KEY = 'PATH_Baseline'
+    _CS_KEY   = 'PATH_CareerStage'
+    _base_res = all_results.get(_BASE_KEY, {})
+    _cs_res   = all_results.get(_CS_KEY, {})
+
+    _CS_NCOL = 10  # 假設, 路徑說明, 時間點, 預期方向, IV, DV, β, SE, CI[lo,hi], 支持？
+    # 計算各職涯階段 n（效果編碼用）
+    _cs_age = df['Age'].replace(-999, np.nan)
+    _n_exp   = int(((df['Age'] != -999) & (_cs_age >= 21) & (_cs_age <= 30)).sum())
+    _n_maint = int(((df['Age'] != -999) & (_cs_age >= 41)).sum())
+    _n_estab = int(((df['Age'] != -999) & (_cs_age >= 31) & (_cs_age <= 40)).sum())
+    title(ws_cs,
+          f"職涯階段路徑分析  N={n_total}  效果編碼：各階段 vs. 其他兩階段平均"
+          f"  EXP=探索期(21-30,n={_n_exp})  ESTAB=建立期(31-40,n={_n_estab})  MAINT=維持期(41+,n={_n_maint})",
+          end_col=_CS_NCOL)
+    ws_cs.cell(row=2, column=1,
+        value="上半部：基礎中介模型（ML + Bootstrap 5000，無調節）；"
+              "下半部：職涯階段調節模型（Bayesian，10000次迭代）；"
+              "β = STDYX；CI = BC Bootstrap 95%（基礎）/ HPD 95%（Bayesian）；顯著 = CI 不含 0"
+    ).font = Font(italic=True, size=9)
+    ws_cs.merge_cells(start_row=2, start_column=1, end_row=2, end_column=_CS_NCOL)
+
+    _csr = 3
+    green_fill_cs = PatternFill("solid", fgColor="E2EFDA")
+    red_fill_cs   = PatternFill("solid", fgColor="FFE0E0")
+
+    def _cs_hdr(label, color="2E4057"):
+        nonlocal _csr
+        _sec = ws_cs.cell(row=_csr, column=1, value=label)
+        _sec.font = Font(bold=True, size=11, color="FFFFFF")
+        _sec.fill = PatternFill("solid", fgColor=color)
+        ws_cs.merge_cells(start_row=_csr, start_column=1, end_row=_csr, end_column=_CS_NCOL)
+        _csr += 1
+
+    def _cs_col_hdr(cols):
+        nonlocal _csr
+        for ci, h in enumerate(cols, 1):
+            if h: hdr(ws_cs, _csr, ci, h)
+        _csr += 1
+
+    def _base_path(key):
+        d = _base_res.get('paths', {}).get(key, {})
+        return (d.get('est', np.nan), d.get('se', np.nan),
+                d.get('ci_lo', np.nan), d.get('ci_hi', np.nan),
+                d.get('p', np.nan))
+
+    def _cs_path(key):
+        d = _cs_res.get('paths', {}).get(key, {})
+        return (d.get('est', np.nan), d.get('sd', np.nan),
+                d.get('ci_lo', np.nan), d.get('ci_hi', np.nan),
+                d.get('sig', False))
+
+    def _cs_row(cells, sig=False, fill=None):
+        nonlocal _csr
+        for ci, v in enumerate(cells, 1):
+            c = ws_cs.cell(row=_csr, column=ci, value=v)
+            c.font = Font(size=10, bold=(ci == len(cells) and sig),
+                          color='006100' if sig else '000000')
+            c.alignment = ctr if ci >= 3 else lft
+            c.border = bdr
+            if fill: c.fill = fill
+        _csr += 1
+
+    def _ci_fmt(lo, hi):
+        if np.isnan(lo) or np.isnan(hi): return '—'
+        return f"[{lo:.3f}, {hi:.3f}]"
+
+    _STD_HDR = ["假設", "路徑說明", "時間點", "預期方向", "IV", "DV", "β (STDYX)", "SE", "95% BC CI", "支持？"]
+    _IND_HDR = ["假設", "路徑說明", "條件／時間點", "預期方向", "IV", "DV", "β (indirect)", "SE", "95% BC CI", "支持？"]
+    _BAY_HDR = ["假設", "路徑說明", "時間點", "預期方向", "IV", "DV", "β (post.mean)", "SD", "95% HPD CI", "支持？"]
+    _BAY_IND = ["假設", "路徑說明", "條件／時間點", "預期方向", "IV", "DV", "β (indirect)", "SD", "95% HPD CI", "支持？"]
+
+    def _verdict(sig, dir_ok, has_data):
+        if not has_data: return '待計算'
+        return '支持' if (sig and dir_ok) else '不支持'
+
+    # ── 基礎中介模型結果 ──────────────────────────────────────────
+    _cs_hdr("第一步：基礎中介模型（ML + Bootstrap 5000，無調節，全樣本 N=357）", color="4472C4")
+    _cs_col_hdr(_STD_HDR)
+
+    # (_hid, 路徑說明, 時間點, 預期方向, IV, DV, path_key)
+    _base_rows = [
+        ('H1a', 'JCP(T1)→DP(T2)（無調節）',  'T1→T2', '+', 'JCP（T1）', 'DP（T2）', 'JCP(T1)→DP(T2)'),
+        ('H1b', 'HP(T1)→DP(T2)（無調節）',   'T1→T2', '+', 'HP（T1）',  'DP（T2）', 'HP(T1)→DP(T2)'),
+        ('H3',  'DP(T2)→CI(T3)（無調節）',   'T2→T3', '+', 'DP（T2）',  'CI（T3）', 'DP(T2)→CI(T3)'),
+        ('H5a', 'JCP(T1)→CI(T3) 直接效果',  'T1→T3', '+', 'JCP（T1）', 'CI（T3）', 'JCP(T1)→CI(T3) 直接'),
+        ('H5b', 'HP(T1)→CI(T3) 直接效果',   'T1→T3', '+', 'HP（T1）',  'CI（T3）', 'HP(T1)→CI(T3) 直接'),
+        ('',    'PP→DP（控制）',              'T1→T2', '', 'PP（T1）',  'DP（T2）', 'PP→DP (控制)'),
+    ]
+    for _hid, _desc, _tpt, _exp, _iv, _dv, _key in _base_rows:
+        _est, _se, _lo, _hi, _pv = _base_path(_key)
+        _star, _ = fmt_p(_pv) if not np.isnan(_pv) else ('', '')
+        _sig = not np.isnan(_lo) and not (_lo <= 0 <= _hi)
+        _dir_ok = (_exp == '' or
+                   (_exp == '+' and not np.isnan(_est) and _est > 0) or
+                   (_exp == '-' and not np.isnan(_est) and _est < 0))
+        _support = _sig and _dir_ok and (_exp != '')
+        _fill = green_fill_cs if _support else None
+        _cs_row([
+            _hid, _desc, _tpt, _exp, _iv, _dv,
+            f"{_est:.3f}{_star}" if not np.isnan(_est) else '—',
+            f"({_se:.3f})" if not np.isnan(_se) else '—',
+            _ci_fmt(_lo, _hi),
+            _verdict(_sig, _dir_ok, not np.isnan(_est)) if _exp != '' else '—',
+        ], sig=_support, fill=_fill)
+
+    # 間接效果
+    _csr += 1
+    _cs_hdr("基礎間接效果（BC Bootstrap 95% CI）", color="375623")
+    _cs_col_hdr(_IND_HDR)
+    for _hid_i, _pname, _desc_i, _iv_i, _dv_i in [
+        ('', 'IND_JCP', 'JCP→DP→CI 間接效果（基礎中介）', 'JCP（T1）', 'CI（T3）'),
+        ('', 'IND_HP',  'HP→DP→CI 間接效果（基礎中介）',  'HP（T1）',  'CI（T3）'),
+    ]:
+        _mc = _base_res.get('modconstr', {}).get(_pname, {})
+        _est = _mc.get('est', np.nan)
+        _se  = _mc.get('se',  np.nan)
+        _lo  = _mc.get('ci_lo', np.nan)
+        _hi  = _mc.get('ci_hi', np.nan)
+        _sig = _mc.get('sig', False)
+        _fill = green_fill_cs if _sig else None
+        _cs_row([
+            _hid_i, _desc_i, 'T1→T2→T3', '+', _iv_i, _dv_i,
+            f"{_est:.3f}" if not np.isnan(_est) else '待填入',
+            f"({_se:.3f})" if not np.isnan(_se) else '—',
+            _ci_fmt(_lo, _hi),
+            _verdict(_sig, True, not np.isnan(_est)),
+        ], sig=_sig, fill=_fill)
+
+    _csr += 1  # 空行隔開兩部分
+
+    # ── JCP-only 模型（排除 HP，共線性確認）──────────────────────────
+    _JCP_KEY = 'PATH_JCP_only'
+    _jcp_res = all_results.get(_JCP_KEY, {})
+
+    def _jcp_path(key):
+        d = _jcp_res.get('paths', {}).get(key, {})
+        return (d.get('est', np.nan), d.get('se', np.nan),
+                d.get('ci_lo', np.nan), d.get('ci_hi', np.nan),
+                d.get('p', np.nan))
+
+    _cs_hdr("補充：JCP-only 模型（排除 HP，確認 JCP 獨立效果；ML + Bootstrap 5000）", color="7030A0")
+    _cs_col_hdr(_STD_HDR)
+
+    _jcp_rows = [
+        ('H1a', 'JCP(T1)→DP(T2)（無HP）',   'T1→T2', '+', 'JCP（T1）', 'DP（T2）', 'JCP(T1)→DP(T2) [JCP-only]'),
+        ('H3',  'DP(T2)→CI(T3)',             'T2→T3', '+', 'DP（T2）',  'CI（T3）', 'DP(T2)→CI(T3)'),
+        ('H5a', 'JCP(T1)→CI(T3) 直接效果',  'T1→T3', '+', 'JCP（T1）', 'CI（T3）', 'JCP(T1)→CI(T3) 直接'),
+        ('',    'PP→DP（控制）',              'T1→T2', '', 'PP（T1）',  'DP（T2）', 'PP→DP (控制)'),
+    ]
+    for _hid, _desc, _tpt, _exp, _iv, _dv, _key in _jcp_rows:
+        _est, _se, _lo, _hi, _pv = _jcp_path(_key)
+        _star, _ = fmt_p(_pv) if not np.isnan(_pv) else ('', '')
+        _sig = not np.isnan(_lo) and not (_lo <= 0 <= _hi)
+        _dir_ok = (_exp == '' or
+                   (_exp == '+' and not np.isnan(_est) and _est > 0) or
+                   (_exp == '-' and not np.isnan(_est) and _est < 0))
+        _support = _sig and _dir_ok and (_exp != '')
+        _fill = green_fill_cs if _support else None
+        _cs_row([
+            _hid, _desc, _tpt, _exp, _iv, _dv,
+            f"{_est:.3f}{_star}" if not np.isnan(_est) else '—',
+            f"({_se:.3f})" if not np.isnan(_se) else '—',
+            _ci_fmt(_lo, _hi),
+            _verdict(_sig, _dir_ok, not np.isnan(_est)) if _exp != '' else '—',
+        ], sig=_support, fill=_fill)
+
+    # JCP-only 間接效果
+    _csr += 1
+    _cs_hdr("JCP-only 間接效果（BC Bootstrap 95% CI）", color="6B3080")
+    _cs_col_hdr(_IND_HDR)
+    _jcp_mc = _jcp_res.get('modconstr', {}).get('IND_JCP', {})
+    _est = _jcp_mc.get('est', np.nan)
+    _se  = _jcp_mc.get('se',  np.nan)
+    _lo  = _jcp_mc.get('ci_lo', np.nan)
+    _hi  = _jcp_mc.get('ci_hi', np.nan)
+    _sig = _jcp_mc.get('sig', False)
+    _fill = green_fill_cs if _sig else None
+    _cs_row([
+        '', 'JCP→DP→CI 間接效果（無HP）', 'T1→T2→T3', '+', 'JCP（T1）', 'CI（T3）',
+        f"{_est:.3f}" if not np.isnan(_est) else '待填入',
+        f"({_se:.3f})" if not np.isnan(_se) else '—',
+        _ci_fmt(_lo, _hi),
+        _verdict(_sig, True, not np.isnan(_est)),
+    ], sig=_sig, fill=_fill)
+
+    _csr += 1  # 空行
+
+    # ── JCP-only + PP 調節模型（確認低 PP 條件間接效果）────────────────
+    _JCP_PP_KEY = 'PATH_JCP_PP'
+    _jcp_pp_res = all_results.get(_JCP_PP_KEY, {})
+
+    def _jcp_pp_path(key):
+        d = _jcp_pp_res.get('paths', {}).get(key, {})
+        return (d.get('est', np.nan), d.get('se', np.nan),
+                d.get('ci_lo', np.nan), d.get('ci_hi', np.nan),
+                d.get('p', np.nan))
+
+    _cs_hdr("補充：JCP-only + PP 調節模型（確認低PP條件間接效果；無HP；ML + Bootstrap 5000）", color="9B2335")
+    _cs_col_hdr(_STD_HDR)
+
+    _jcp_pp_rows = [
+        ('', 'JCP(T1)→DP(T2)（PP取均值）',  'T1→T2',    '+', 'JCP（T1）',  'DP（T2）', 'JCP(T1)→DP(T2) [at mean PP]'),
+        ('', 'JCP×PP→DP（PP調節a-path）',    'T1×T1→T2', '-', 'JCP×PP（T1）','DP（T2）', 'JCP×PP→DP (a-path 調節)'),
+        ('', 'DP(T2)→CI(T3)（PP取均值）',   'T2→T3',    '+', 'DP（T2）',   'CI（T3）', 'DP(T2)→CI(T3) [at mean PP]'),
+        ('', 'DP×PP→CI（PP調節b-path）',     'T2×T1→T3', '-', 'DP×PP（T2）','CI（T3）', 'DP×PP→CI (b-path 調節)'),
+        ('', 'JCP(T1)→CI(T3) 直接效果',     'T1→T3',    '+', 'JCP（T1）',  'CI（T3）', 'JCP(T1)→CI(T3) 直接'),
+    ]
+    for _hid, _desc, _tpt, _exp, _iv, _dv, _key in _jcp_pp_rows:
+        _est, _se, _lo, _hi, _pv = _jcp_pp_path(_key)
+        _star, _ = fmt_p(_pv) if not np.isnan(_pv) else ('', '')
+        _sig = not np.isnan(_lo) and not (_lo <= 0 <= _hi)
+        _dir_ok = (_exp == '' or
+                   (_exp == '+' and not np.isnan(_est) and _est > 0) or
+                   (_exp == '-' and not np.isnan(_est) and _est < 0))
+        _support = _sig and _dir_ok and (_exp != '')
+        _fill = green_fill_cs if _support else None
+        _cs_row([
+            _hid, _desc, _tpt, _exp, _iv, _dv,
+            f"{_est:.3f}{_star}" if not np.isnan(_est) else '—',
+            f"({_se:.3f})" if not np.isnan(_se) else '—',
+            _ci_fmt(_lo, _hi),
+            _verdict(_sig, _dir_ok, not np.isnan(_est)) if _exp != '' else '—',
+        ], sig=_support, fill=_fill)
+
+    # JCP-only + PP 條件間接效果
+    _csr += 1
+    _cs_hdr("JCP-only + PP 條件間接效果（BC Bootstrap 95% CI，PP ±1SD）", color="7A1C2A")
+    _cs_col_hdr(_IND_HDR)
+    for _mc_key, _pp_lbl in [('IND_HI', 'PP +1SD（主動型人格高）'), ('IND_LO', 'PP -1SD（主動型人格低）')]:
+        _mc = _jcp_pp_res.get('modconstr', {}).get(_mc_key, {})
+        _est = _mc.get('est', np.nan)
+        _se  = _mc.get('se',  np.nan)
+        _lo  = _mc.get('ci_lo', np.nan)
+        _hi  = _mc.get('ci_hi', np.nan)
+        _sig = _mc.get('sig', False)
+        _fill = green_fill_cs if _sig else None
+        _cs_row([
+            '', 'JCP→DP→CI 條件間接效果', _pp_lbl, '+', 'JCP（T1）', 'CI（T3）',
+            f"{_est:.3f}" if not np.isnan(_est) else '待填入',
+            f"({_se:.3f})" if not np.isnan(_se) else '—',
+            _ci_fmt(_lo, _hi),
+            _verdict(_sig, True, not np.isnan(_est)),
+        ], sig=_sig, fill=_fill)
+
+    _csr += 1  # 空行
+
+    # ── a-path 主效果 + 職涯階段調節 ──
+    _cs_hdr("第二步：職涯階段調節 a-path（Bayesian，效果編碼：各階段 vs. 其他兩階段平均）")
+    _cs_col_hdr(_BAY_HDR)
+
+    # (_hid, 路徑說明, 時間點, 預期方向, IV, DV, path_key)
+    _cs_a_rows = [
+        ('H1a', 'JCP(T1)→DP(T2)（所有階段平均）',          'T1→T2',    '+', 'JCP（T1）',    'DP（T2）', 'JCP(T1)→DP(T2) [ESTAB均值]'),
+        ('H1b', 'HP(T1)→DP(T2)（所有階段平均）',           'T1→T2',    '+', 'HP（T1）',     'DP（T2）', 'HP(T1)→DP(T2) [ESTAB均值]'),
+        ('H2a', 'JCP×EXP_C→DP（探索期 vs 其他兩期平均）',  'T1×T1→T2', '+', 'JCP×EXP_C',   'DP（T2）', 'JCP×EXP_C→DP (探索期效果)'),
+        ('H2b', 'JCP×MAINT_C→DP（維持期 vs 其他兩期平均）','T1×T1→T2', '-', 'JCP×MAINT_C', 'DP（T2）', 'JCP×MAINT_C→DP (維持期效果)'),
+        ('H3a', 'HP×EXP_C→DP（探索期 vs 其他兩期平均）',   'T1×T1→T2', '?', 'HP×EXP_C',    'DP（T2）', 'HP×EXP_C→DP (探索期效果)'),
+        ('H3b', 'HP×MAINT_C→DP（維持期 vs 其他兩期平均）', 'T1×T1→T2', '?', 'HP×MAINT_C',  'DP（T2）', 'HP×MAINT_C→DP (維持期效果)'),
+    ]
+    for _hid, _desc, _tpt, _exp, _iv, _dv, _key in _cs_a_rows:
+        _est, _sd, _lo, _hi, _sig = _cs_path(_key)
+        _dir_ok = (_exp == '?' or
+                   (_exp == '+' and not np.isnan(_est) and _est > 0) or
+                   (_exp == '-' and not np.isnan(_est) and _est < 0))
+        _support = _sig and _dir_ok and (_exp != '?')
+        _fill = green_fill_cs if _support else (red_fill_cs if not np.isnan(_est) and _sig and not _dir_ok else None)
+        _cs_row([
+            _hid, _desc, _tpt, _exp, _iv, _dv,
+            f"{_est:.3f}" if not np.isnan(_est) else '—',
+            f"({_sd:.3f})" if not np.isnan(_sd) else '—',
+            _ci_fmt(_lo, _hi),
+            _verdict(_sig, _dir_ok, not np.isnan(_est)) if _exp != '?' else ('顯著' if _sig else '不顯著'),
+        ], sig=_support, fill=_fill)
+
+    # ── b-path + 直接效果 ──
+    _csr += 1
+    _cs_hdr("b-path / 直接效果：DP(T2)→CI(T3)，JCP/HP→CI 直接")
+    _cs_col_hdr(_BAY_HDR)
+
+    _cs_b_rows = [
+        ('H3',   'DP(T2)→CI(T3)',         'T2→T3', '+', 'DP（T2）',  'CI（T3）', 'DP(T2)→CI(T3)'),
+        ('H5a',  'JCP(T1)→CI(T3) 直接效果','T1→T3', '+', 'JCP（T1）', 'CI（T3）', 'JCP(T1)→CI(T3) 直接'),
+        ('H5b',  'HP(T1)→CI(T3) 直接效果', 'T1→T3', '+', 'HP（T1）',  'CI（T3）', 'HP(T1)→CI(T3) 直接'),
+    ]
+    for _hid, _desc, _tpt, _exp, _iv, _dv, _key in _cs_b_rows:
+        _est, _sd, _lo, _hi, _sig = _cs_path(_key)
+        _dir_ok = (_exp == '+' and not np.isnan(_est) and _est > 0) or \
+                  (_exp == '-' and not np.isnan(_est) and _est < 0)
+        _support = _sig and _dir_ok
+        _fill = green_fill_cs if _support else None
+        _cs_row([
+            _hid, _desc, _tpt, _exp, _iv, _dv,
+            f"{_est:.3f}" if not np.isnan(_est) else '—',
+            f"({_sd:.3f})" if not np.isnan(_sd) else '—',
+            _ci_fmt(_lo, _hi),
+            _verdict(_sig, _dir_ok, not np.isnan(_est)),
+        ], sig=_support, fill=_fill)
+
+    # ── 條件間接效果 ──
+    _csr += 1
+    _cs_hdr("條件間接效果：JCP/HP→DP→CI 依職涯階段（Bayesian MODEL CONSTRAINT，效果編碼，95% HPD CI）")
+    _cs_col_hdr(_BAY_IND)
+
+    _cs_mc = _cs_res.get('modconstr', {})
+    _cs_ind_specs = [
+        ('H4a', 'JCP→DP→CI 條件間接', f'探索期（EXP，n={_n_exp}）',    'JCP（T1）', 'CI（T3）', 'IE_E_J'),
+        ('H4a', 'JCP→DP→CI 條件間接', f'建立期（ESTAB，n={_n_estab}）', 'JCP（T1）', 'CI（T3）', 'IE_R_J'),
+        ('H4a', 'JCP→DP→CI 條件間接', f'維持期（MAINT，n={_n_maint}）', 'JCP（T1）', 'CI（T3）', 'IE_M_J'),
+        ('H4b', 'HP→DP→CI 條件間接',  f'探索期（EXP，n={_n_exp}）',    'HP（T1）',  'CI（T3）', 'IE_E_H'),
+        ('H4b', 'HP→DP→CI 條件間接',  f'建立期（ESTAB，n={_n_estab}）', 'HP（T1）',  'CI（T3）', 'IE_R_H'),
+        ('H4b', 'HP→DP→CI 條件間接',  f'維持期（MAINT，n={_n_maint}）', 'HP（T1）',  'CI（T3）', 'IE_M_H'),
+    ]
+    for _hid, _path_lbl, _stage, _iv_i, _dv_i, _key in _cs_ind_specs:
+        _mc = _cs_mc.get(_key, {})
+        _est = _mc.get('est', np.nan)
+        _sd  = _mc.get('sd',  np.nan)
+        _lo  = _mc.get('ci_lo', np.nan)
+        _hi  = _mc.get('ci_hi', np.nan)
+        _sig = _mc.get('sig', False)
+        _fill = green_fill_cs if _sig else None
+        _cs_row([
+            _hid, _path_lbl, _stage, '+', _iv_i, _dv_i,
+            f"{_est:.3f}" if not np.isnan(_est) else '待填入',
+            f"({_sd:.3f})" if not np.isnan(_sd) else '—',
+            _ci_fmt(_lo, _hi),
+            _verdict(_sig, True, not np.isnan(_est)),
+        ], sig=_sig, fill=_fill)
+
+    set_widths(ws_cs, [('A', 10), ('B', 40), ('C', 30), ('D', 16),
+                       ('E', 18), ('F', 18), ('G', 10), ('H', 18), ('I', 16), ('J', 10)])
+
+    # ── Sheet 8: SPSS 語法（.sps 內容）── 語法附錄 ───────────────────
+    ws_spss = wb.create_sheet("8_SPSS語法")
     ws_spss.cell(row=1, column=1,
                  value="SPSS 分析語法（.sps）— 可直接複製至 SPSS 語法視窗執行"
                  ).font = Font(bold=True, size=12)
@@ -4156,112 +5290,24 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         ws_spss.row_dimensions[r_spss].height = max(80, sps_syntax.count('\n') * 12)
         r_spss += 1
 
-    # ── Sheet 2: 各量表題目 item-level 描述統計 + 刪題建議 ────────
-    ws9 = wb.create_sheet("2_量表題目統計")
-    ws9.cell(row=1, column=1,
-             value=f"各量表 Item-level 描述統計 + 刪題建議（三波完整樣本，N = {n_total}）"
-             ).font = Font(bold=True, size=12)
-    ws9.merge_cells(start_row=1, start_column=1, end_row=1, end_column=12)
-
-    note_row = 2
-    ws9.cell(row=note_row, column=1,
-             value="刪題標準：CITC < .30 或「刪題後α > 量表α」→ 建議刪題（紅色標示）"
-             ).font = Font(italic=True, size=9, color='C00000')
-    ws9.merge_cells(start_row=note_row, start_column=1,
-                    end_row=note_row, end_column=12)
-
-    hdr_cols = ["量表", "波次", "題號", "變數名",
-                "M", "SD", "Min", "Max",
-                "CITC", "刪題後α", "量表α", "刪題建議"]
-    for ci, h in enumerate(hdr_cols, 1):
-        hdr(ws9, 3, ci, h)
-
-    # 量表定義：(中文名稱, 英文代碼, 題數)
-    scale_defs = [
-        ('階層停滯 HP',     'HP',  6),
-        ('工作內容停滯 JCP','JCP', 6),
-        ('主動型人格 PP',   'PP',  6),
-        ('決策拖延 DP',     'DP',  5),
-        ('職涯無所作為 CI', 'CI',  8),
-    ]
-    waves = ['T1', 'T2', 'T3']
-
-    fill_del  = PatternFill("solid", fgColor="FFE0E0")   # 淡紅：建議刪
-    fill_ok   = PatternFill("solid", fgColor="E2EFDA")   # 淡綠：保留
-    fill_warn = PatternFill("solid", fgColor="FFF2CC")   # 黃：邊界
-
-    excl_s11 = set(exclude or [])
-    r9 = 4
-    for scale_zh, scale_code, n_items in scale_defs:
-        for wave in waves:
-            all_cols_wave = [f"{scale_code}{j}_{wave}" for j in range(1, n_items + 1)
-                             if f"{scale_code}{j}" not in excl_s11]
-            scale_alpha   = _cronbach(df, all_cols_wave)
-
-            for i in range(1, n_items + 1):
-                col_name = f"{scale_code}{i}_{wave}"
-                if col_name not in df.columns:
-                    continue
-                s    = df[col_name].dropna()
-                citc, alpha_del = _citc_and_alpha_if_deleted(df, all_cols_wave, col_name)
-
-                # 刪題判斷
-                delete_citc  = (not np.isnan(citc))  and citc  < 0.30
-                delete_alpha = (not np.isnan(alpha_del) and not np.isnan(scale_alpha)) \
-                               and alpha_del > scale_alpha
-                suggest_del  = delete_citc or delete_alpha
-                border_case  = (not np.isnan(citc)) and (0.30 <= citc < 0.40)
-
-                suggestion = '建議刪題 ⚠️' if suggest_del else ('邊界，留意' if border_case else '保留 ✓')
-                row_fill   = fill_del if suggest_del else (fill_warn if border_case else fill_ok)
-
-                vals = [
-                    scale_zh, wave, f'{scale_code}{i}', col_name,
-                    round(float(s.mean()), 3) if len(s) > 0 else 'N/A',
-                    round(float(s.std()),  3) if len(s) > 0 else 'N/A',
-                    round(float(s.min()),  1) if len(s) > 0 else 'N/A',
-                    round(float(s.max()),  1) if len(s) > 0 else 'N/A',
-                    citc       if not np.isnan(citc)       else 'N/A',
-                    alpha_del  if not np.isnan(alpha_del)  else 'N/A',
-                    scale_alpha if not np.isnan(scale_alpha) else 'N/A',
-                    suggestion,
-                ]
-                for ci_idx, val in enumerate(vals, 1):
-                    c = ws9.cell(row=r9, column=ci_idx, value=val)
-                    c.font = Font(
-                        size=10,
-                        bold=(ci_idx == 12 and suggest_del),
-                        color='C00000' if (ci_idx == 12 and suggest_del) else '000000'
-                    )
-                    c.alignment = Alignment(
-                        horizontal='left' if ci_idx <= 4 else 'center',
-                        vertical='center')
-                    c.border = bdr
-                    c.fill = row_fill
-                r9 += 1
-
-            # 空行分隔波次
-            r9 += 1
-        # 空行分隔量表
-        r9 += 1
-
-    set_widths(ws9, [
-        ('A', 20), ('B', 6), ('C', 8), ('D', 14),
-        ('E', 7),  ('F', 7), ('G', 6), ('H', 6),
-        ('I', 7),  ('J', 9), ('K', 8), ('L', 14),
-    ])
-    ws9.freeze_panes = ws9['A4']
-
-    # ── Sheet 3: CFA 因素負荷量（模型1 CFA-A、模型2 CFA-B、模型5 M1）──────────────────────
-    ws12 = wb.create_sheet("3_CFA因素負荷量")
-    title(ws12, f"CFA 標準化因素負荷量（STDYX，T1，N = {n_total}）— 模型1/2/5", end_col=7)
-    note12_cell = ws12.cell(row=2, column=1,
+    # ── CFA 因素負荷量（附加在 5_CFA分析 下方，模型1/2/5）───────────
+    _ldg_start = ws4.max_row + 2
+    _ldg_sec = ws4.cell(row=_ldg_start, column=1,
+        value=f"CFA 標準化因素負荷量（STDYX，T1，N = {n_total}）— 模型1/2/5")
+    _ldg_sec.font = Font(bold=True, size=12)
+    ws4.merge_cells(start_row=_ldg_start, start_column=1,
+                    end_row=_ldg_start, end_column=7)
+    _ldg_start += 1
+    _ldg_note = ws4.cell(row=_ldg_start, column=1,
         value="判斷標準：λ ≥ 0.50 為可接受；< 0.40 建議刪題（標示橘色）；< 0.50 邊緣（標示黃色）；p < .05 顯著")
-    note12_cell.font = Font(italic=True, size=9, color='C00000')
-    ws12.merge_cells(start_row=2, start_column=1, end_row=2, end_column=7)
-
+    _ldg_note.font = Font(italic=True, size=9, color='C00000')
+    ws4.merge_cells(start_row=_ldg_start, start_column=1,
+                    end_row=_ldg_start, end_column=7)
+    _ldg_start += 1
     for ci, h in enumerate(["因子", "題目", "β (STDYX)", "SE", "z 值", "p 值", "建議"], 1):
-        hdr(ws12, 3, ci, h)
+        hdr(ws4, _ldg_start, ci, h)
+    _ldg_start += 1
+    ws12 = ws4  # alias so _write_loading_section code below is unchanged
 
     orange_fill = PatternFill("solid", fgColor="FFB347")
     yellow_fill = PatternFill("solid", fgColor="FFFF99")
@@ -4324,7 +5370,7 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         r += 1  # blank separator
         return r
 
-    r12 = 4
+    r12 = _ldg_start
     r12 = _write_loading_section(ws12, r12,
         'CFA-A (JCP+DP+CI)',
         '模型1（CFA-A）：JCP + DP + CI 三因子標準化因素負荷量')
@@ -4332,33 +5378,193 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         'CFA-B (HP+DP+CI)',
         '模型2（CFA-B）：HP + DP + CI 三因子標準化因素負荷量')
     r12 = _write_loading_section(ws12, r12,
-        'CFA-M1 (HP+JCP+PP+DP+CI, 5F)',
+        'CFA-E (HP+JCP+PP+DP+CI, 5F)',
         '模型5（CFA-E）：HP/JCP/PP/DP/CI 五因子標準化因素負荷量（區別效度基準）')
+    r12 = _write_loading_section(ws12, r12,
+        'CFA-H (Cross-Wave 5F)',
+        '模型8（CFA-H）：跨波次五因子因素負荷量（HP/JCP/PP=T1，DP=T2，CI=T3）')
+    r12 = _write_loading_section(ws12, r12,
+        'CFA-I (Cross-Wave 4F, no PP)',
+        '模型9（CFA-I）：跨波次四因子因素負荷量（HP/JCP=T1，DP=T2，CI=T3，不含 PP）')
 
-    set_widths(ws12, [('A', 22), ('B', 10), ('C', 12), ('D', 8),
-                      ('E', 9),  ('F', 8),  ('G', 14)])
-    ws12.freeze_panes = ws12['A4']
+    set_widths(ws4, [('A', 22), ('B', 10), ('C', 16), ('D', 8),
+                     ('E', 9),  ('F', 28), ('G', 14)])
 
-    # ── 依新版 Sheet 順序排列索引標籤 ──────────────────────────────
-    # 目標順序：1_背景、2_量表題目、3_CFA負荷量、4_敘述統計、
-    #            5_CFA適配、6_相關矩陣(T1/T2/T3)、7_RI相關、
-    #            8_RICLPM適配、9_路徑係數、10_H7、11_SPSS、12_Mplus
-    _desired_sheet_order = [
-        "1_背景變項",
-        "2_量表題目統計",
-        "3_CFA因素負荷量",
-        "4_敘述統計與信度",
-        "5_CFA適配",
-        "6_相關矩陣T1",
-        "6b_相關矩陣T2",
-        "6c_相關矩陣T3",
-        "7_RI相關",
-        "8_RICLPM適配",
-        "9_路徑係數",
-        "10_H7間接效果",
-        "11_SPSS語法",
-        "12_Mplus語法",
+    # ── 績效考核分析（T1/T2/T3 + 三波相關，同一張表）────────────────
+    # 同類表格集中在同一 sheet，依論文章節邏輯分區呈現
+    _ws_pm = wb.create_sheet("2_績效考核分析")
+    title(_ws_pm, f"績效考核背景變項分析（三波次，N = {n_total}）", end_col=13)
+    _pr = 3
+    _sec_fill = PatternFill(fill_type='solid', fgColor='D9E1F2')
+
+    _pm_waves = [
+        ('T1', '第一波（T1）', {
+            'has': 'PM_Has_T1', 'supervisor': 'PM_Supervisor_T1',
+            'self': 'PM_Self_T1', 'interview': 'PM_Interview_T1',
+            'other': 'PM_Other_T1', 'result': 'PM_Result_T1', 'help': 'PM_Help_T1',
+        }),
+        ('T2', '第二波（T2）', {
+            'has': 'PM_Has_T2', 'supervisor': 'PM_Supervisor_T2',
+            'self': 'PM_Self_T2', 'interview': 'PM_Interview_T2',
+            'other': 'PM_Other_T2', 'result': 'PM_Result_T2', 'help': 'PM_Help_T2',
+        }),
+        ('T3', '第三波（T3）', {
+            'has': 'PM_Has_T3', 'supervisor': 'PM_Supervisor_T3',
+            'self': 'PM_Self_T3', 'interview': 'PM_Interview_T3',
+            'other': 'PM_Other_T3', 'result': 'PM_Result_T3', 'help': 'PM_Help_T3',
+        }),
     ]
+    for _wave, _wave_lbl, _cols in _pm_waves:
+        # section header (shaded)
+        _sec_cell = _ws_pm.cell(row=_pr, column=1, value=_wave_lbl)
+        _sec_cell.font = Font(bold=True, size=11)
+        _sec_cell.fill = _sec_fill
+        _ws_pm.merge_cells(start_row=_pr, start_column=1, end_row=_pr, end_column=4)
+        for _ci in range(1, 5):
+            _ws_pm.cell(row=_pr, column=_ci).fill = _sec_fill
+        _pr += 1
+        for _ci, _h in enumerate(["變項", "類別／統計量", "人數／數值", "%"], 1):
+            hdr(_ws_pm, _pr, _ci, _h)
+        _pr += 1
+
+        _has_s = pd.to_numeric(df.get(_cols['has'], pd.Series(dtype=float)), errors='coerce')
+        _n_has = int((_has_s == 1).sum())
+        _n_not = int((_has_s == 0).sum())
+
+        cell(_ws_pm, _pr, 1, '是否有績效考核', bold=True, align='left')
+        for _ci in range(2, 5): cell(_ws_pm, _pr, _ci, '')
+        _pr += 1
+        for _lbl, _cnt in [('有', _n_has), ('無', _n_not)]:
+            _pct = _cnt / n_total * 100 if n_total > 0 else 0
+            cell(_ws_pm, _pr, 1, ''); cell(_ws_pm, _pr, 2, _lbl, align='left')
+            cell(_ws_pm, _pr, 3, _cnt); cell(_ws_pm, _pr, 4, f"{_pct:.1f}%")
+            _pr += 1
+
+        cell(_ws_pm, _pr, 1, '考核形式（有考核者，可複選）', bold=True, align='left')
+        for _ci in range(2, 5): cell(_ws_pm, _pr, _ci, '')
+        _pr += 1
+        _base = _n_has if _n_has > 0 else 1
+        for _fkey, _flbl in [('supervisor','主管評核'),('self','自我評核'),
+                               ('interview','績效面談'),('other','其他')]:
+            _fs = pd.to_numeric(df.get(_cols[_fkey], pd.Series(dtype=float)), errors='coerce')
+            _fn = int((_fs == 1).sum())
+            cell(_ws_pm, _pr, 1, ''); cell(_ws_pm, _pr, 2, _flbl, align='left')
+            cell(_ws_pm, _pr, 3, _fn); cell(_ws_pm, _pr, 4, f"{_fn/_base*100:.1f}%")
+            _pr += 1
+
+        _res_s = pd.to_numeric(df.get(_cols['result'], pd.Series(dtype=float)), errors='coerce')
+        cell(_ws_pm, _pr, 1, '考核結果性質', bold=True, align='left')
+        for _ci in range(2, 5): cell(_ws_pm, _pr, _ci, '')
+        _pr += 1
+        for _val, _lbl in [(1,'負向'),(2,'中立／持平'),(3,'正向')]:
+            _cnt = int((_res_s == _val).sum())
+            _pct = _cnt / n_total * 100 if n_total > 0 else 0
+            cell(_ws_pm, _pr, 1, ''); cell(_ws_pm, _pr, 2, _lbl, align='left')
+            cell(_ws_pm, _pr, 3, _cnt); cell(_ws_pm, _pr, 4, f"{_pct:.1f}%")
+            _pr += 1
+
+        _hlp_s = pd.to_numeric(df.get(_cols['help'], pd.Series(dtype=float)), errors='coerce').dropna()
+        cell(_ws_pm, _pr, 1, '考核對職涯幫助程度（1–5）', bold=True, align='left')
+        for _ci in range(2, 5): cell(_ws_pm, _pr, _ci, '')
+        _pr += 1
+        if len(_hlp_s) > 0:
+            cell(_ws_pm, _pr, 1, ''); cell(_ws_pm, _pr, 2, 'M (SD)', align='left')
+            cell(_ws_pm, _pr, 3, f"{_hlp_s.mean():.2f} ({_hlp_s.std():.2f})"); cell(_ws_pm, _pr, 4, '')
+            _pr += 1
+            cell(_ws_pm, _pr, 1, ''); cell(_ws_pm, _pr, 2, '最小值 ~ 最大值', align='left')
+            cell(_ws_pm, _pr, 3, f"{_hlp_s.min():.0f} ~ {_hlp_s.max():.0f}"); cell(_ws_pm, _pr, 4, '')
+            _pr += 1
+        _pr += 1  # blank separator between waves
+
+    # 注腳
+    _ws_pm.cell(row=_pr, column=1,
+        value="考核形式百分比以「有績效考核」者為分母（可複選）；結果性質及幫助程度以全樣本為分母"
+    ).font = Font(italic=True, size=9)
+    _ws_pm.merge_cells(start_row=_pr, start_column=1, end_row=_pr, end_column=4)
+    _pr += 2
+
+    # ── 三波次相關矩陣（接在同一 sheet 下方）────────────────────────
+    _sec2 = _ws_pm.cell(row=_pr, column=1, value="三波次績效考核主要變項相關矩陣")
+    _sec2.font = Font(bold=True, size=11)
+    _sec2.fill = _sec_fill
+    _ws_pm.merge_cells(start_row=_pr, start_column=1, end_row=_pr, end_column=13)
+    for _ci in range(1, 14):
+        _ws_pm.cell(row=_pr, column=_ci).fill = _sec_fill
+    _pr += 1
+
+    _pmcorr_vars = [
+        ('PM_Has_T1',    'T1 有績效考核'),
+        ('PM_Result_T1', 'T1 考核結果（1–3）'),
+        ('PM_Help_T1',   'T1 考核幫助程度'),
+        ('PM_Has_T2',    'T2 有績效考核'),
+        ('PM_Result_T2', 'T2 考核結果（1–3）'),
+        ('PM_Help_T2',   'T2 考核幫助程度'),
+        ('PM_Has_T3',    'T3 有績效考核'),
+        ('PM_Result_T3', 'T3 考核結果（1–3）'),
+        ('PM_Help_T3',   'T3 考核幫助程度'),
+    ]
+    _nv = len(_pmcorr_vars)
+    _pmcorr_hdrs = ['#', '變項', 'M', 'SD'] + [str(i+1) for i in range(_nv)]
+    for _ci, _h in enumerate(_pmcorr_hdrs, 1):
+        hdr(_ws_pm, _pr, _ci, _h)
+    _pr += 1
+
+    _pm_series = [pd.to_numeric(df.get(_col, pd.Series(dtype=float)), errors='coerce')
+                  for _col, _ in _pmcorr_vars]
+    for _i, ((_col, _lbl), _si) in enumerate(zip(_pmcorr_vars, _pm_series)):
+        cell(_ws_pm, _pr, 1, _i + 1)
+        cell(_ws_pm, _pr, 2, _lbl, align='left')
+        cell(_ws_pm, _pr, 3, f"{_si.mean():.2f}" if _si.notna().sum() > 0 else '—')
+        cell(_ws_pm, _pr, 4, f"{_si.std():.2f}"  if _si.notna().sum() > 1 else '—')
+        for _j, _sj in enumerate(_pm_series):
+            if _j < _i:
+                _vld = pd.concat([_si, _sj], axis=1).dropna()
+                if len(_vld) > 2:
+                    _rv = _vld.iloc[:, 0].corr(_vld.iloc[:, 1])
+                    _clr = ('C00000' if abs(_rv) >= .5 else ('996633' if abs(_rv) >= .3 else '000000'))
+                    cell(_ws_pm, _pr, 5 + _j, f"{_rv:.2f}", color=_clr)
+                else:
+                    cell(_ws_pm, _pr, 5 + _j, '—')
+            elif _j == _i:
+                cell(_ws_pm, _pr, 5 + _j, '—')
+        _pr += 1
+
+    _ws_pm.cell(row=_pr, column=1,
+        value="下三角相關係數；|r| ≥ .50 紅色，|r| ≥ .30 棕色；成對刪除法處理遺漏值"
+    ).font = Font(italic=True, size=9)
+    _ws_pm.merge_cells(start_row=_pr, start_column=1, end_row=_pr, end_column=_nv + 4)
+    set_widths(_ws_pm, [('A', 30), ('B', 26), ('C', 12), ('D', 10)] +
+               [(chr(ord('E') + i), 7) for i in range(_nv)])
+
+    # ── NoPP 版本：移除職涯階段分析 Sheet ──────────────────────────
+    if variant_label == 'nopp' and "7_職涯階段分析" in [s.title for s in wb._sheets]:
+        del wb["7_職涯階段分析"]
+
+    # ── 依論文研究方法章節順序排列索引標籤 ──────────────────────────
+    # SPSS分析在前，Mplus分析在後，語法附錄最後
+    if variant_label == 'nopp':
+        _desired_sheet_order = [
+            "1_背景變項",
+            "2_績效考核分析",
+            "3_敘述統計與信度",
+            "4_相關矩陣",
+            "5_CFA分析",
+            "6_假設檢驗",
+            "8_SPSS語法",
+            "9_Mplus語法",
+        ]
+    else:
+        _desired_sheet_order = [
+            "1_背景變項",          # SPSS: 人口統計
+            "2_績效考核分析",      # SPSS: 績效考核（三波 + 相關）
+            "3_敘述統計與信度",    # SPSS: M/SD/α
+            "4_相關矩陣",          # Python: 三波段追蹤相關矩陣（15×15）
+            "5_CFA分析",           # Mplus: CFA適配 + 負荷量 + AVE/CR
+            "6_假設檢驗",          # Mplus: 完整調節中介 H1~H7
+            "7_職涯階段分析",      # Mplus Bayes: 職涯階段補充分析
+            "8_SPSS語法",          # 附錄：SPSS語法
+            "9_Mplus語法",         # 附錄：Mplus語法（CFA + PATH）
+        ]
     _existing_names = [s.title for s in wb._sheets]
     _ordered = []
     for _sname in _desired_sheet_order:
@@ -4371,8 +5577,11 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
     wb._sheets = _ordered
 
     # ── 儲存 ─────────────────────────────────────────────────────
-    vtag = ('_' + variant_label.replace(' ', '').replace('+', '_')) if variant_label else ''
-    excel_path = os.path.join(run_dir, f"Thesis_Results{vtag}_{ts}.xlsx")
+    if variant_label == 'nopp':
+        excel_path = os.path.join(run_dir, f"Thesis_NoPP_{ts}.xlsx")
+    else:
+        vtag = ('_' + variant_label.replace(' ', '').replace('+', '_')) if variant_label else ''
+        excel_path = os.path.join(run_dir, f"Thesis_Results{vtag}_{ts}.xlsx")
     try:
         wb.save(excel_path)
         print(f"  [OK] Excel 報告已儲存：{excel_path}")
@@ -4380,6 +5589,615 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
         print(f"  [錯誤] Excel 儲存失敗：{e}")
         return None
     return excel_path
+
+
+# ==========================================
+# MODULE G: Analysis Summary .md（根目錄）
+# ==========================================
+def generate_analysis_summary_md(run_dir, ts, g3_sample, alpha_dict, corr_dict,
+                                  all_results, attrition_md, desc_md,
+                                  variant=None):
+    """
+    產生完整 Pipeline_Master_Report_{ts}.md 至 run_dir。
+    variant='nopp': 輸出 Report_NoPP_{ts}.md，使用 PATH_NoPP 結果，跳過 7/8/9 補充分析。
+    """
+    is_nopp = (variant == 'nopp')
+    date_tag = ts[:8]
+    n = len(g3_sample) if g3_sample is not None else 357
+
+    # ── 輔助：格式化單一路徑結果 ─────────────────────────────────────────────
+    def _v(paths, label, key='est', na='—'):
+        d = paths.get(label, {})
+        return f"{d[key]:.3f}" if (d and key in d and d[key] is not None) else na
+
+    def _ci(paths, label, na='—'):
+        d = paths.get(label, {})
+        if d and 'ci_lo' in d and 'ci_hi' in d:
+            return f"[{d['ci_lo']:.3f}, {d['ci_hi']:.3f}]"
+        return na
+
+    def _pval(paths, label, na='—'):
+        d = paths.get(label, {})
+        if not d or 'p' not in d: return na
+        p = d['p']
+        if p < 0.001: return '<.001'
+        return f'.{round(p*1000):03d}'[:4].lstrip('0') or '.000'
+
+    def _sup(paths, label, expected_dir='+'):
+        d = paths.get(label, {})
+        if not d: return '（待執行）'
+        ci_lo = d.get('ci_lo'); ci_hi = d.get('ci_hi')
+        p = d.get('p', 1.0); est = d.get('est', 0)
+        if ci_lo is not None and ci_hi is not None:
+            sig = not (ci_lo <= 0 <= ci_hi)
+        else:
+            sig = p < 0.05
+        if not sig: return '✗ 不支持'
+        if expected_dir == '+' and est > 0: return '✓ 支持'
+        if expected_dir == '-' and est < 0: return '✓ 支持'
+        return '✗（方向不符）'
+
+    def _mc_v(mc, key, val_key='est', na='—'):
+        d = mc.get(key, {})
+        return f"{d[val_key]:.3f}" if (d and val_key in d) else na
+
+    def _mc_ci(mc, key, na='—'):
+        d = mc.get(key, {})
+        if d and 'ci_lo' in d and 'ci_hi' in d:
+            return f"[{d['ci_lo']:.3f}, {d['ci_hi']:.3f}]"
+        return na
+
+    def _mc_sup(mc, key):
+        d = mc.get(key, {})
+        if not d: return '（待執行）'
+        ci_lo = d.get('ci_lo'); ci_hi = d.get('ci_hi')
+        if ci_lo is not None and ci_hi is not None:
+            return '✗ 不顯著' if (ci_lo <= 0 <= ci_hi) else '✓ 顯著'
+        return '—'
+
+    # ── PATH ModMed 結果 ─────────────────────────────────────────────────────
+    _pm = all_results.get('PATH (T1→T2→T3)', {})
+    pm_paths = _pm.get('paths', {})
+    pm_mc    = _pm.get('modconstr', {})
+
+    # ── PATH Baseline 結果 ───────────────────────────────────────────────────
+    _bl = all_results.get('PATH_Baseline', {})
+    bl_paths = _bl.get('paths', {})
+    bl_mc    = _bl.get('modconstr', {})
+
+    # ── PATH JCP-only ────────────────────────────────────────────────────────
+    _jcp = all_results.get('PATH_JCP_only', {})
+    jcp_paths = _jcp.get('paths', {})
+    jcp_mc    = _jcp.get('modconstr', {})
+
+    # ── PATH JCP+PP ──────────────────────────────────────────────────────────
+    _jpp = all_results.get('PATH_JCP_PP', {})
+    jpp_paths = _jpp.get('paths', {})
+    jpp_mc    = _jpp.get('modconstr', {})
+
+    # ── PATH CareerStage（Bayesian）──────────────────────────────────────────
+    _cs = all_results.get('PATH_CareerStage', {})
+    cs_paths = _cs.get('paths', {})
+    cs_mc    = _cs.get('modconstr', {})
+
+    # ── 績效考核統計（從 g3_sample 計算）────────────────────────────────────
+    def _pm_stats(wave):
+        """回傳 (has_pct, neg_n, neu_n, pos_n, help_m, help_sd)"""
+        has_col    = f'PM_Has_T{wave}'
+        res_col    = f'PM_Result_T{wave}'
+        help_col   = f'PM_Help_T{wave}'
+        if g3_sample is None or has_col not in g3_sample.columns:
+            return ('—', '—', '—', '—', '—', '—')
+        df = g3_sample
+        has_pct = f"{df[has_col].mean()*100:.1f}%" if has_col in df.columns else '—'
+        if res_col in df.columns:
+            neg = int((df[res_col] < 3).sum())
+            neu = int((df[res_col] == 3).sum())
+            pos = int((df[res_col] > 3).sum())
+        else:
+            neg = neu = pos = '—'
+        if help_col in df.columns:
+            hm = f"{df[help_col].mean():.2f}"
+            hs = f"{df[help_col].std():.2f}"
+        else:
+            hm = hs = '—'
+        return (has_pct, neg, neu, pos, f"{hm} ({hs})")
+
+    # ════════════════════════════════════════════════════════════════════════
+    lines = []
+    A = lines.append
+
+    if is_nopp:
+        A(f"# 分析報告【不含 PP 版本】純中介模型（產生時間: {ts}）")
+    else:
+        A(f"# 全階段資料分析自動化整合報告（產生時間: {ts}）")
+    A(f"> 資料：三波配對樣本 N = {n}（Group = 3）")
+    A("")
+    A("---")
+    A("")
+
+    # ── 一、研究設計概述 ──────────────────────────────────────────────────────
+    A("## 一、研究設計概述")
+    A("")
+    A("- **縱貫三波**：T1（預測變項）→ T2（中介）→ T3（結果）")
+    A("- **主要路徑**：HP / JCP (T1) → 決策拖延 DP (T2) → 職涯無所作為 CI (T3)")
+    if is_nopp:
+        A("- **版本說明**：本版本移除 PP（主動型人格）調節，檢驗純中介主路徑（H1~H4）")
+    else:
+        A("- **調節變項**：主動型人格 PP (T1)，調節 a-path 與 b-path")
+        A("- **補充分析**：職涯階段（探索／建立／維護）Bayesian 調節")
+    A("")
+    A("---")
+    A("")
+
+    # ── 二、樣本流失分析 ─────────────────────────────────────────────────────
+    # attrition_md 已由 analyze_attrition() 格式化，直接嵌入並調整標題層級
+    attrition_section = attrition_md.replace(
+        "## 1. 樣本流失分析 (Attrition Analysis)",
+        "## 二、樣本流失分析（Attrition Analysis）"
+    )
+    A(attrition_section.strip())
+    A("")
+    A("---")
+    A("")
+
+    # ── 三、敘述統計與信度分析 ＋ 四、相關矩陣 ──────────────────────────────
+    desc_section = desc_md
+    desc_section = desc_section.replace(
+        "## 2. 敘述性統計與信度分析 (Descriptives & Reliability)",
+        "## 三、敘述統計與信度分析（N = {n}）".format(n=n)
+    )
+    # 移除 desc_md 中的 T1 相關矩陣區塊（改由下方完整版取代）
+    _corr_sep = "\n## 3. 相關矩陣 (Correlation Matrix)"
+    if _corr_sep in desc_section:
+        desc_section = desc_section[:desc_section.index(_corr_sep)]
+    A(desc_section.strip())
+    A("")
+
+    # ── 四、三波段追蹤相關矩陣（完整，12×12 + 15×15）──────────────────────────
+    A(f"## 四、三波段追蹤相關矩陣（N = {n}）")
+    A("")
+    A("> 對角線括號內為 Cronbach's α；*** p<.001  ** p<.01  * p<.05；成對刪除法處理遺漏值")
+    A("")
+
+    _df_md = g3_sample if g3_sample is not None else pd.DataFrame()
+
+    def _md_compute_composites(iv_defs, df_data):
+        composites, alphas = [], []
+        for sn, wv, lbl, ni in iv_defs:
+            cols = [f'{sn}{k}_{wv}' for k in range(1, ni+1)]
+            vcols = [c for c in cols if c in df_data.columns]
+            if vcols:
+                mat = df_data[vcols].apply(pd.to_numeric, errors='coerce')
+                composites.append(mat.mean(axis=1))
+                alphas.append(calculate_cronbach_alpha(mat.dropna()))
+            else:
+                composites.append(pd.Series([np.nan]*len(df_data)))
+                alphas.append(np.nan)
+        return composites, alphas
+
+    def _md_corr_table(iv_defs, composites, alphas):
+        _n = len(iv_defs)
+        hdr = "| 變數 | " + " | ".join(str(i+1) for i in range(_n)) + " | M | SD |"
+        sep = "|---|" + "---|"*_n + "---|---|"
+        rows = [hdr, sep]
+        for i, (sn, wv, lbl, ni) in enumerate(iv_defs):
+            cells = []
+            for j in range(_n):
+                if i == j:
+                    a = alphas[i]
+                    cells.append(f"({a:.3f})" if not np.isnan(a) else "(—)")
+                elif i > j:
+                    vd = pd.concat([composites[i], composites[j]], axis=1).dropna()
+                    if len(vd) > 2:
+                        rv, pv = stats.pearsonr(vd.iloc[:,0], vd.iloc[:,1])
+                        star, _ = fmt_p(pv)
+                        cells.append(f"{rv:.2f}{star}")
+                    else:
+                        cells.append("—")
+                else:
+                    cells.append(" ")
+            mv = composites[i].mean() if composites[i].notna().sum() > 1 else np.nan
+            sv = composites[i].std()  if composites[i].notna().sum() > 1 else np.nan
+            rows.append(f"| {lbl} | " + " | ".join(cells) +
+                        f" | {mv:.2f} | {sv:.2f} |" if not np.isnan(mv) else
+                        f"| {lbl} | " + " | ".join(cells) + " | — | — |")
+        return "\n".join(rows)
+
+    # 12×12（不含 PP）
+    _defs_12 = [
+        ('HP',  'T1', 'HP（T1）',  6), ('JCP', 'T1', 'JCP（T1）', 6),
+        ('DP',  'T1', 'DP（T1）',  5), ('CI',  'T1', 'CI（T1）',  8),
+        ('HP',  'T2', 'HP（T2）',  6), ('JCP', 'T2', 'JCP（T2）', 6),
+        ('DP',  'T2', 'DP（T2）',  5), ('CI',  'T2', 'CI（T2）',  8),
+        ('HP',  'T3', 'HP（T3）',  6), ('JCP', 'T3', 'JCP（T3）', 6),
+        ('DP',  'T3', 'DP（T3）',  5), ('CI',  'T3', 'CI（T3）',  8),
+    ]
+    _c12, _a12 = _md_compute_composites(_defs_12, _df_md)
+    A("### 4A  12×12 追蹤相關矩陣（HP / JCP / DP / CI × T1~T3，不含 PP）")
+    A("")
+    A(_md_corr_table(_defs_12, _c12, _a12))
+    A("")
+
+    # 15×15（含 PP）
+    _defs_15 = [
+        ('HP',  'T1', 'HP（T1）',  6), ('JCP', 'T1', 'JCP（T1）', 6),
+        ('DP',  'T1', 'DP（T1）',  5), ('CI',  'T1', 'CI（T1）',  8),
+        ('PP',  'T1', 'PP（T1）',  6),
+        ('HP',  'T2', 'HP（T2）',  6), ('JCP', 'T2', 'JCP（T2）', 6),
+        ('DP',  'T2', 'DP（T2）',  5), ('CI',  'T2', 'CI（T2）',  8),
+        ('PP',  'T2', 'PP（T2）',  6),
+        ('HP',  'T3', 'HP（T3）',  6), ('JCP', 'T3', 'JCP（T3）', 6),
+        ('DP',  'T3', 'DP（T3）',  5), ('CI',  'T3', 'CI（T3）',  8),
+        ('PP',  'T3', 'PP（T3）',  6),
+    ]
+    _c15, _a15 = _md_compute_composites(_defs_15, _df_md)
+    A("### 4B  15×15 追蹤相關矩陣（含 PP，N = {n}）".format(n=n))
+    A("")
+    A(_md_corr_table(_defs_15, _c15, _a15))
+    A("")
+
+    A("---")
+    A("")
+
+    # ── 四之一、CFA 測量模型適配指數 ─────────────────────────────────────────
+    A("## 四之一、CFA 測量模型適配指數")
+    A("")
+    A("| 模型 | 結構 | CFI | RMSEA | SRMR | 判斷 |")
+    A("|------|------|-----|-------|------|------|")
+    def _cfa_row(key, label, desc):
+        fit = all_results.get(key, {}).get('fit', {})
+        cfi  = fit.get('cfi');   cfi_s  = f"{cfi:.3f}"  if isinstance(cfi,  float) else '—'
+        rmse = fit.get('rmsea'); rmse_s = f"{rmse:.3f}" if isinstance(rmse, float) else '—'
+        srmr = fit.get('srmr');  srmr_s = f"{srmr:.3f}" if isinstance(srmr, float) else '—'
+        ok = (isinstance(cfi, float) and cfi >= .90 and
+              isinstance(rmse, float) and rmse <= .08 and
+              isinstance(srmr, float) and srmr <= .08)
+        verdict = '✅' if ok else ('⚠️' if fit else '（未執行）')
+        return f"| {label} | {desc} | {cfi_s} | {rmse_s} | {srmr_s} | {verdict} |"
+    A(_cfa_row('CFA-E (HP+JCP+PP+DP+CI, 5F)', '模型5 CFA-E', 'HP/JCP/PP/DP/CI 五因子（T1）'))
+    A(_cfa_row('CFA-H (Cross-Wave 5F)',         '模型8 CFA-H', 'HP/JCP/PP(T1) + DP(T2) + CI(T3) 跨波次'))
+    A(_cfa_row('CFA-I (Cross-Wave 4F, no PP)', '模型9 CFA-I', 'HP/JCP(T1) + DP(T2) + CI(T3) 跨波次，不含 PP'))
+    A("")
+    A("> 判斷標準：CFI ≥ .90；RMSEA ≤ .08；SRMR ≤ .08。CFA-H 使用跨波次測量：HP/JCP/PP 取 T1，DP 取 T2，CI 取 T3。")
+    A("")
+    A("---")
+    A("")
+
+    # ── 五、假設檢驗 ──────────────────────────────────────────────────────────
+    if is_nopp:
+        # NoPP 版本：純中介模型 H1~H4
+        _np = all_results.get('PATH_NoPP', {})
+        np_paths = _np.get('paths', {})
+        np_mc    = _np.get('modconstr', {})
+        A("## 五、假設檢驗結果：純中介模型（PATH_NoPP，不含 PP）")
+        A("")
+        A("> 估計方法：ML + Bootstrap 5000；信賴區間：BC Bootstrap 95% CI")
+        A("> JCP_T1、HP_T1、DP_T2 均以 grand-mean 中心化")
+        A("")
+        A("### 5-1 a-path：HP / JCP → DP")
+        A("")
+        A("| 假設 | 路徑 | β (STDYX) | SE | 95% BC CI | p | 支持？ |")
+        A("|------|------|-----------|-----|-----------|---|--------|")
+        A(f"| H1a | JCP(T1)→DP(T2) | {_v(np_paths,'H1a: JCP(T1)→DP(T2)')} | {_v(np_paths,'H1a: JCP(T1)→DP(T2)','se')} | {_ci(np_paths,'H1a: JCP(T1)→DP(T2)')} | {_pval(np_paths,'H1a: JCP(T1)→DP(T2)')} | {_sup(np_paths,'H1a: JCP(T1)→DP(T2)','+')} |")
+        A(f"| H1b | HP(T1)→DP(T2) | {_v(np_paths,'H1b: HP(T1)→DP(T2)')} | {_v(np_paths,'H1b: HP(T1)→DP(T2)','se')} | {_ci(np_paths,'H1b: HP(T1)→DP(T2)')} | {_pval(np_paths,'H1b: HP(T1)→DP(T2)')} | {_sup(np_paths,'H1b: HP(T1)→DP(T2)','+')} |")
+        A("")
+        A("### 5-2 b-path：DP → CI")
+        A("")
+        A("| 假設 | 路徑 | β (STDYX) | SE | 95% BC CI | p | 支持？ |")
+        A("|------|------|-----------|-----|-----------|---|--------|")
+        A(f"| H2 | DP(T2)→CI(T3) | {_v(np_paths,'H2: DP(T2)→CI(T3)')} | {_v(np_paths,'H2: DP(T2)→CI(T3)','se')} | {_ci(np_paths,'H2: DP(T2)→CI(T3)')} | {_pval(np_paths,'H2: DP(T2)→CI(T3)')} | {_sup(np_paths,'H2: DP(T2)→CI(T3)','+')} |")
+        A("")
+        A("### 5-3 c'-path：HP / JCP 直接 → CI")
+        A("")
+        A("| 假設 | 路徑 | β (STDYX) | SE | 95% BC CI | p | 支持？ |")
+        A("|------|------|-----------|-----|-----------|---|--------|")
+        A(f"| H3a | JCP(T1)→CI(T3) 直接 | {_v(np_paths,'H3a: JCP(T1)→CI(T3) 直接')} | {_v(np_paths,'H3a: JCP(T1)→CI(T3) 直接','se')} | {_ci(np_paths,'H3a: JCP(T1)→CI(T3) 直接')} | {_pval(np_paths,'H3a: JCP(T1)→CI(T3) 直接')} | {_sup(np_paths,'H3a: JCP(T1)→CI(T3) 直接','+')} |")
+        A(f"| H3b | HP(T1)→CI(T3) 直接 | {_v(np_paths,'H3b: HP(T1)→CI(T3) 直接')} | {_v(np_paths,'H3b: HP(T1)→CI(T3) 直接','se')} | {_ci(np_paths,'H3b: HP(T1)→CI(T3) 直接')} | {_pval(np_paths,'H3b: HP(T1)→CI(T3) 直接')} | {_sup(np_paths,'H3b: HP(T1)→CI(T3) 直接','+')} |")
+        A("")
+        A("### 5-4 間接效果 H4（Bootstrap 5000）")
+        A("")
+        A("| 假設 | 路徑 | β (indirect) | 95% BC CI | 顯著？ |")
+        A("|------|------|--------------|-----------|--------|")
+        A(f"| H4a | JCP→DP→CI | {_mc_v(np_mc,'IND_JCP')} | {_mc_ci(np_mc,'IND_JCP')} | {_mc_sup(np_mc,'IND_JCP')} |")
+        A(f"| H4b | HP→DP→CI | {_mc_v(np_mc,'IND_HP')} | {_mc_ci(np_mc,'IND_HP')} | {_mc_sup(np_mc,'IND_HP')} |")
+        A("")
+        A("---")
+        A("")
+    else:
+        A("## 五、假設檢驗結果：完整調節中介模型（PATH_ModMed）")
+        A("")
+        A("> 估計方法：ML + Bootstrap 5000；信賴區間：BC Bootstrap 95% CI")
+        A("> 所有 T1 變項及 DP_T2 均以 grand-mean 中心化")
+        A("")
+        # a-path
+        A("### 5-1 a-path：HP / JCP → DP（PP 調節）")
+        A("")
+        A("| 假設 | 路徑 | β (STDYX) | SE | 95% BC CI | p | 支持？ |")
+        A("|------|------|-----------|-----|-----------|---|--------|")
+        _H1a_k = 'H1a: JCP(T1)→DP(T2) [at mean PP]'
+        _H1b_k = 'H1b: HP(T1)→DP(T2) [at mean PP]'
+        _H2a_k = 'H2a: PP×JCP→DP (moderation)'
+        _H2b_k = 'H2b: PP×HP→DP (moderation)'
+        A(f"| H1a | JCP(T1)→DP(T2)（at mean PP） | {_v(pm_paths,_H1a_k)} | {_v(pm_paths,_H1a_k,'se')} | {_ci(pm_paths,_H1a_k)} | {_pval(pm_paths,_H1a_k)} | {_sup(pm_paths,_H1a_k,'+')} |")
+        A(f"| H1b | HP(T1)→DP(T2)（at mean PP） | {_v(pm_paths,_H1b_k)} | {_v(pm_paths,_H1b_k,'se')} | {_ci(pm_paths,_H1b_k)} | {_pval(pm_paths,_H1b_k)} | {_sup(pm_paths,_H1b_k,'+')} |")
+        A(f"| H2a | JCP×PP→DP | {_v(pm_paths,_H2a_k)} | {_v(pm_paths,_H2a_k,'se')} | {_ci(pm_paths,_H2a_k)} | {_pval(pm_paths,_H2a_k)} | {_sup(pm_paths,_H2a_k,'-')} |")
+        A(f"| H2b | HP×PP→DP | {_v(pm_paths,_H2b_k)} | {_v(pm_paths,_H2b_k,'se')} | {_ci(pm_paths,_H2b_k)} | {_pval(pm_paths,_H2b_k)} | {_sup(pm_paths,_H2b_k,'-')} |")
+        A("")
+        # b-path
+        A("### 5-2 b-path：DP → CI（PP 調節）")
+        A("")
+        A("| 假設 | 路徑 | β (STDYX) | SE | 95% BC CI | p | 支持？ |")
+        A("|------|------|-----------|-----|-----------|---|--------|")
+        _H3_k = 'H3:  DP(T2)→CI(T3) [at mean PP]'
+        _H4_k = 'H4:  PP×DP→CI (moderation)'
+        A(f"| H3 | DP(T2)→CI(T3)（at mean PP） | {_v(pm_paths,_H3_k)} | {_v(pm_paths,_H3_k,'se')} | {_ci(pm_paths,_H3_k)} | {_pval(pm_paths,_H3_k)} | {_sup(pm_paths,_H3_k,'+')} |")
+        A(f"| H4 | DP×PP→CI | {_v(pm_paths,_H4_k)} | {_v(pm_paths,_H4_k,'se')} | {_ci(pm_paths,_H4_k)} | {_pval(pm_paths,_H4_k)} | {_sup(pm_paths,_H4_k,'-')} |")
+        A("")
+        # c'-path
+        A("### 5-3 c'-path：HP / JCP 直接 → CI（PP 調節）")
+        A("")
+        A("| 假設 | 路徑 | β (STDYX) | SE | 95% BC CI | p | 支持？ |")
+        A("|------|------|-----------|-----|-----------|---|--------|")
+        _H5a_k = 'H5a: JCP(T1)→CI(T3) [at mean PP]'
+        _H5b_k = 'H5b: HP(T1)→CI(T3) [at mean PP]'
+        _H6a_k = 'H6a: PP×JCP→CI (moderation)'
+        _H6b_k = 'H6b: PP×HP→CI (moderation)'
+        A(f"| H5a | JCP(T1)→CI(T3) 直接 | {_v(pm_paths,_H5a_k)} | {_v(pm_paths,_H5a_k,'se')} | {_ci(pm_paths,_H5a_k)} | {_pval(pm_paths,_H5a_k)} | {_sup(pm_paths,_H5a_k,'+')} |")
+        A(f"| H5b | HP(T1)→CI(T3) 直接 | {_v(pm_paths,_H5b_k)} | {_v(pm_paths,_H5b_k,'se')} | {_ci(pm_paths,_H5b_k)} | {_pval(pm_paths,_H5b_k)} | {_sup(pm_paths,_H5b_k,'+')} |")
+        A(f"| H6a | JCP×PP→CI | {_v(pm_paths,_H6a_k)} | {_v(pm_paths,_H6a_k,'se')} | {_ci(pm_paths,_H6a_k)} | {_pval(pm_paths,_H6a_k)} | {_sup(pm_paths,_H6a_k,'-')} |")
+        A(f"| H6b | HP×PP→CI | {_v(pm_paths,_H6b_k)} | {_v(pm_paths,_H6b_k,'se')} | {_ci(pm_paths,_H6b_k)} | {_pval(pm_paths,_H6b_k)} | {_sup(pm_paths,_H6b_k,'-')} |")
+        A("")
+        # H7 條件間接
+        A("### 5-4 條件間接效果 H7（Bootstrap 5000，PP ±1SD）")
+        A("")
+        A("| 假設 | 路徑 | PP 水準 | β (indirect) | 95% BC CI | 支持？ |")
+        A("|------|------|---------|--------------|-----------|--------|")
+        A(f"| H7a | JCP→DP→CI | 高 PP (+1SD) | {_mc_v(pm_mc,'IND_HI_J')} | {_mc_ci(pm_mc,'IND_HI_J')} | {_mc_sup(pm_mc,'IND_HI_J')} |")
+        A(f"| H7a | JCP→DP→CI | 低 PP (−1SD) | {_mc_v(pm_mc,'IND_LO_J')} | {_mc_ci(pm_mc,'IND_LO_J')} | {_mc_sup(pm_mc,'IND_LO_J')} |")
+        A(f"| H7b | HP→DP→CI | 高 PP (+1SD) | {_mc_v(pm_mc,'IND_HI_H')} | {_mc_ci(pm_mc,'IND_HI_H')} | {_mc_sup(pm_mc,'IND_HI_H')} |")
+        A(f"| H7b | HP→DP→CI | 低 PP (−1SD) | {_mc_v(pm_mc,'IND_LO_H')} | {_mc_ci(pm_mc,'IND_LO_H')} | {_mc_sup(pm_mc,'IND_LO_H')} |")
+        A("")
+        A("---")
+        A("")
+
+        # ── 六、基礎中介模型 ──────────────────────────────────────────────────
+        A("## 六、基礎中介模型（PATH_Baseline）—「不含調節」主路徑")
+        A("")
+        A("> 用途：確認主路徑方向與顯著性，排除調節效果干擾")
+        A("")
+        A("| 假設 | 路徑 | β (STDYX) | SE | 95% CI | p | 支持？ |")
+        A("|------|------|-----------|-----|--------|---|--------|")
+        for hyp, lbl, exp in [
+            ("H1a", "JCP(T1)→DP(T2)",       '+'),
+            ("H1b", "HP(T1)→DP(T2)",        '+'),
+            ("H3",  "DP(T2)→CI(T3)",        '+'),
+            ("H5a", "JCP(T1)→CI(T3) 直接",  '+'),
+            ("H5b", "HP(T1)→CI(T3) 直接",   '+'),
+        ]:
+            A(f"| {hyp} | {lbl} | {_v(bl_paths,lbl)} | {_v(bl_paths,lbl,'se')} | {_ci(bl_paths,lbl)} | {_pval(bl_paths,lbl)} | {_sup(bl_paths,lbl,exp)} |")
+        A(f"| — | 間接效果 JCP→DP→CI | {_mc_v(bl_mc,'IND_JCP')} | — | {_mc_ci(bl_mc,'IND_JCP')} | — | {_mc_sup(bl_mc,'IND_JCP')} |")
+        A(f"| — | 間接效果 HP→DP→CI | {_mc_v(bl_mc,'IND_HP')} | — | {_mc_ci(bl_mc,'IND_HP')} | — | {_mc_sup(bl_mc,'IND_HP')} |")
+        A("")
+        A("---")
+        A("")
+
+    # ── NoPP 版本：早期返回，跳過補充分析 ────────────────────────────────────
+    if is_nopp:
+        A(f"*此摘要依據 {ts} pipeline 輸出（純中介版本，不含 PP 調節）*")
+        content = "\n".join(lines)
+        out_path = os.path.join(run_dir, f"Report_NoPP_{ts}.md")
+        with open(out_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"  [OK] NoPP Report: {out_path}")
+        return out_path
+
+    # ── 七、JCP-only ─────────────────────────────────────────────────────────
+    A("## 七、JCP-only（PATH_JCP_only，移除 HP）")
+    A("")
+    A("> 目的：確認完整模型中 JCP 不顯著是否由 HP 共線性抑制所致")
+    A("")
+    A("| 路徑 | β (STDYX) | SE | 95% CI | p | 說明 |")
+    A("|------|-----------|-----|--------|---|------|")
+    for lbl, note in [
+        ("JCP(T1)→DP(T2)",      ""),
+        ("DP(T2)→CI(T3)",       ""),
+        ("JCP(T1)→CI(T3) 直接", "若顯著→HP 抑制 JCP"),
+    ]:
+        A(f"| {lbl} | {_v(jcp_paths,lbl)} | {_v(jcp_paths,lbl,'se')} | {_ci(jcp_paths,lbl)} | {_pval(jcp_paths,lbl)} | {note} |")
+    A(f"| 間接效果 JCP→DP→CI | {_mc_v(jcp_mc,'IND_JCP')} | — | {_mc_ci(jcp_mc,'IND_JCP')} | — | |")
+    A("")
+    A("---")
+    A("")
+
+    # ── 八、JCP-only + PP ────────────────────────────────────────────────────
+    A("## 八、JCP-only + PP 調節模型（PATH_JCP_PP）")
+    A("")
+    A("> 確認 PP 是否調節 JCP 路徑（移除 HP，保留 PP）")
+    A("")
+    A("| 路徑 | β (STDYX) | SE | 95% CI | p | 說明 |")
+    A("|------|-----------|-----|--------|---|------|")
+    for lbl, note in [
+        ("JCP(T1)→DP(T2) [at mean PP]",  ""),
+        ("JCP×PP→DP (a-path 調節)",       ""),
+        ("DP(T2)→CI(T3) [at mean PP]",   ""),
+        ("DP×PP→CI (b-path 調節)",        ""),
+        ("JCP(T1)→CI(T3) 直接",           ""),
+    ]:
+        A(f"| {lbl} | {_v(jpp_paths,lbl)} | {_v(jpp_paths,lbl,'se')} | {_ci(jpp_paths,lbl)} | {_pval(jpp_paths,lbl)} | {note} |")
+    A("")
+    A("**條件間接效果（PP ±1SD）：**")
+    A("")
+    A("| PP 水準 | β (indirect) | 95% BC CI | 說明 |")
+    A("|---------|--------------|-----------|------|")
+    A(f"| 高 PP (+1SD) | {_mc_v(jpp_mc,'IND_HI')} | {_mc_ci(jpp_mc,'IND_HI')} | {_mc_sup(jpp_mc,'IND_HI')} |")
+    A(f"| 低 PP (−1SD) | {_mc_v(jpp_mc,'IND_LO')} | {_mc_ci(jpp_mc,'IND_LO')} | {_mc_sup(jpp_mc,'IND_LO')} |")
+    A("")
+    A("---")
+    A("")
+
+    # ── 九、職涯階段補充分析（Bayesian）──────────────────────────────────────
+    A("## 九、職涯階段補充分析（PATH_CareerStage，Bayesian）")
+    A("")
+    A("> 估計方法：Bayesian MCMC；信賴區間：95% HPD CI（可信區間）")
+    A("> 效果編碼：探索期 EXP_C=+1；維護期 MAINT_C=+1；建立期兩者均 −0.5")
+    A("")
+    A("### 9-1 樣本職涯階段分布")
+    A("")
+    if g3_sample is not None and 'Age_Group' in g3_sample.columns:
+        exp_n  = int((g3_sample['Age_Group'] == 'EXP').sum())
+        est_n  = int((g3_sample['Age_Group'] == 'ESTAB').sum())
+        mnt_n  = int((g3_sample['Age_Group'] == 'MAINT').sum())
+    else:
+        exp_n, est_n, mnt_n = 64, 235, 58
+    total = exp_n + est_n + mnt_n
+    A("| 階段 | 年齡 | N | 佔比 |")
+    A("|------|------|---|------|")
+    A(f"| 探索期（EXP）  | 21–30 歲 | {exp_n}  | {exp_n/total*100:.1f}% |")
+    A(f"| 建立期（ESTAB）| 31–40 歲 | {est_n} | {est_n/total*100:.1f}% |")
+    A(f"| 維護期（MAINT）| 41 歲以上 | {mnt_n}  | {mnt_n/total*100:.1f}% |")
+    A("")
+    A("### 9-2 主效果（averaged across all stages）")
+    A("")
+    A("| 路徑 | β (post.mean) | SD | 95% HPD | p（one-tail） | 說明 |")
+    A("|------|--------------|-----|---------|---------------|------|")
+    for lbl, hyp in [
+        ("JCP(T1)→DP(T2) [ESTAB均值]",  "H1a"),
+        ("HP(T1)→DP(T2) [ESTAB均值]",   "H1b"),
+        ("DP(T2)→CI(T3)",               "H3"),
+        ("JCP(T1)→CI(T3) 直接",          "H5a"),
+        ("HP(T1)→CI(T3) 直接",           "H5b"),
+    ]:
+        A(f"| {lbl} | {_v(cs_paths,lbl)} | {_v(cs_paths,lbl,'se')} | {_ci(cs_paths,lbl)} | {_pval(cs_paths,lbl)} | {hyp} |")
+    A("")
+    A("### 9-3 職涯階段交互作用項（a-path 調節）")
+    A("")
+    A("| 交互作用項 | β | SD | 95% HPD | 說明 |")
+    A("|-----------|----|----|---------|------|")
+    for lbl in ['JCP×EXP_C→DP (探索期效果)', 'JCP×MAINT_C→DP (維護期效果)',
+                'HP×EXP_C→DP (探索期效果)',  'HP×MAINT_C→DP (維護期效果)']:
+        A(f"| {lbl} | {_v(cs_paths,lbl)} | {_v(cs_paths,lbl,'se')} | {_ci(cs_paths,lbl)} | {_sup(cs_paths,lbl,'-')} |")
+    A("")
+    A("### 9-4 條件間接效果（依職涯階段）")
+    A("")
+    A("| 條件間接效果 | 階段 | β (indirect) | 95% HPD | 顯著？ |")
+    A("|-------------|------|--------------|---------|--------|")
+    for mc_key, label, stage in [
+        ('ie_e_j', 'JCP→DP→CI', '探索期'), ('ie_m_j', 'JCP→DP→CI', '維護期'), ('ie_r_j', 'JCP→DP→CI', '建立期'),
+        ('ie_e_h', 'HP→DP→CI',  '探索期'), ('ie_m_h', 'HP→DP→CI',  '維護期'), ('ie_r_h', 'HP→DP→CI',  '建立期'),
+    ]:
+        A(f"| {label} | {stage} | {_mc_v(cs_mc,mc_key)} | {_mc_ci(cs_mc,mc_key)} | {_mc_sup(cs_mc,mc_key)} |")
+    A("")
+    A("---")
+    A("")
+
+    # ── 十、績效考核補充資料 ─────────────────────────────────────────────────
+    A("## 十、績效考核補充資料（待老師確認方向）")
+    A("")
+    A("> 資料來源：Analysis_Ready_Data 中 PM_Has / PM_Result / PM_Help 欄位")
+    A("")
+    A("| 波次 | 有考核比例 | 負向 n | 中立 n | 正向 n | 幫助程度 M (SD) |")
+    A("|------|-----------|--------|--------|--------|----------------|")
+    for wave, label in [(1,'T1'), (2,'T2'), (3,'T3')]:
+        stats_ = _pm_stats(wave)
+        A(f"| {label} | {stats_[0]} | {stats_[1]} | {stats_[2]} | {stats_[3]} | {stats_[4]} |")
+    A("")
+    A("---")
+    A("")
+
+    # ── 十一、分析語法索引 ───────────────────────────────────────────────────
+    A("## 十一、分析語法索引")
+    A("")
+    A("| 工具 | 分析目的 | 檔案 |")
+    A("|------|---------|------|")
+    A(f"| SPSS | 匯入資料 + 變數標籤 | `SPSS_Syntax_{ts}.sps` |")
+    A(f"| SPSS | 完整分析（描述統計／相關／CMV／CITC／信度）| `SPSS_Analysis_{ts}.sps` |")
+    A(f"| Mplus | CFA-E 五因子 (HP/JCP/PP/DP/CI, T1) | `CFA_E_FiveFactor_{ts}.inp` |")
+    A(f"| Mplus | CFA-H 跨波次五因子 (HP/JCP/PP@T1, DP@T2, CI@T3) | `CFA_H_CrossWave_{ts}.inp` |")
+    A(f"| Mplus | CFA-I 跨波次四因子，不含 PP (HP/JCP@T1, DP@T2, CI@T3) | `CFA_I_CrossWave_4F_{ts}.inp` |")
+    A(f"| Mplus | CFA-F 四因子 (CP合併/PP/DP/CI) | `CFA_F_FourFactor_CP_merged_{ts}.inp` |")
+    A(f"| Mplus | CFA-G 三因子 (CP/DP/CI) | `CFA_G_ThreeFactor_CP_DP_CI_{ts}.inp` |")
+    A(f"| Mplus | 測量不變性（MI） | `MI_A/B_*_{ts}.inp` |")
+    A(f"| Mplus | 完整調節中介路徑模型 | `PATH_ModMed_{ts}.inp` |")
+    A(f"| Mplus | 基礎中介（無調節）| `PATH_Baseline_{ts}.inp` |")
+    A(f"| Mplus | JCP-only 模型 | `PATH_JCP_only_{ts}.inp` |")
+    A(f"| Mplus | JCP+PP 調節模型 | `PATH_JCP_PP_{ts}.inp` |")
+    A(f"| Mplus | 職涯階段 Bayesian 模型 | `PATH_CareerStage_{ts}.inp` |")
+    A("")
+    A("---")
+    A("")
+
+    # ── 十二、整體結論摘要 ───────────────────────────────────────────────────
+    A("## 十二、整體結論摘要")
+    A("")
+    A("### 支持的假設")
+    A("")
+    A("| 假設 | 路徑 | 模型 |")
+    A("|------|------|------|")
+    # 動態判斷哪些假設支持
+    _supported = {
+        'H1b': (_sup(pm_paths,_H1b_k,'+') == '✓ 支持', "HP(T1)→DP(T2)", "完整模型"),
+        'H3':  (_sup(pm_paths,_H3_k, '+') == '✓ 支持', "DP(T2)→CI(T3)", "完整模型"),
+        'H5b': (_sup(pm_paths,_H5b_k,'+') == '✓ 支持', "HP(T1)→CI(T3) 直接", "完整模型"),
+    }
+    has_supported = False
+    for hyp, (ok, path, model) in _supported.items():
+        if ok:
+            A(f"| {hyp} | {path} | {model} |")
+            has_supported = True
+    # H7b 間接
+    h7b_hi_ok = _mc_sup(pm_mc,'IND_HI_H') == '✓ 顯著'
+    h7b_lo_ok = _mc_sup(pm_mc,'IND_LO_H') == '✓ 顯著'
+    if h7b_hi_ok:
+        A("| H7b（高PP）| HP→DP→CI 條件間接 | 完整模型，高 PP 時顯著 |")
+        has_supported = True
+    if h7b_lo_ok:
+        A("| H7b（低PP）| HP→DP→CI 條件間接 | 完整模型，低 PP 時顯著 |")
+        has_supported = True
+    if not has_supported:
+        A("| （待 Mplus 執行後填入）| — | — |")
+    A("")
+    A("### 不支持的假設")
+    A("")
+    A("| 假設 | 路徑 | 備註 |")
+    A("|------|------|------|")
+    _not_supported = [
+        ('H1a', _sup(pm_paths,_H1a_k,'+'), "JCP(T1)→DP(T2)"),
+        ('H2a', _sup(pm_paths,_H2a_k,'-'), "JCP×PP→DP"),
+        ('H2b', _sup(pm_paths,_H2b_k,'-'), "HP×PP→DP"),
+        ('H4',  _sup(pm_paths,_H4_k, '-'), "DP×PP→CI"),
+        ('H5a', _sup(pm_paths,_H5a_k,'+'), "JCP(T1)→CI(T3) 直接"),
+        ('H6a', _sup(pm_paths,_H6a_k,'-'), "JCP×PP→CI"),
+        ('H6b', _sup(pm_paths,_H6b_k,'-'), "HP×PP→CI"),
+    ]
+    has_not = False
+    for hyp, result, path in _not_supported:
+        if '不支持' in result or '待執行' in result:
+            A(f"| {hyp} | {path} | {result} |")
+            has_not = True
+    if not has_not:
+        A("| （待 Mplus 執行後填入）| — | — |")
+    A("")
+    A("### JCP 的特殊發現（與 HP 共線性）")
+    A("")
+    _jcp_ci_full = _ci(pm_paths, _H1a_k)
+    A(f"- 完整模型（含 HP）：JCP→DP 路徑 β={_v(pm_paths,_H1a_k)}，CI={_jcp_ci_full}（不顯著）")
+    _jcp_direct_jcponly = _v(jcp_paths, 'JCP(T1)→CI(T3) 直接')
+    A(f"- JCP-only 模型（移除 HP）：JCP→CI 直接路徑 β={_jcp_direct_jcponly}")
+    A("- **可能解釋**：HP 與 JCP 相關，HP 的效果在完整模型中壓制了 JCP（競爭預測）")
+    A("")
+    A("---")
+    A("")
+    A(f"*此摘要依據 {ts} pipeline 輸出，β 值均為 STDYX 標準化係數（職涯階段模型除外）*")
+
+    # ════════════════════════════════════════════════════════════════════════
+    content = "\n".join(lines)
+    fname = f"Report_NoPP_{ts}.md" if is_nopp else f"Pipeline_Master_Report_{ts}.md"
+    out_path = os.path.join(run_dir, fname)
+    with open(out_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print(f"  [OK] Pipeline Master Report: {out_path}")
+    return out_path
 
 
 # ==========================================
@@ -4424,15 +6242,314 @@ def generate_excel_report(run_dir, ts, g3_sample, alpha_dict, corr_dict, all_res
 # 建議執行步驟：
 #   1. python pipeline_master.py
 #   2. 確認 Master_Pipeline_Output/<ts>/ 資料夾下有：
-#        - Thesis_Results_<ts>.xlsx（7 個 Sheet 資料正確）
-#        - CFA_A~D_<ts>.inp 及 _b5.inp（Big5 版本可在另一台電腦開啟）
-#        - RI_CLPM_A~D_<ts>.inp 及 _b5.inp
-#        - 若已安裝 Mplus：.out 檔會自動產生，Excel 內數字會填入
+#        - Thesis_Results_<ts>.xlsx（9 個 Sheet 資料正確）
+#        - CFA_A~D_<ts>.inp、CFA_E/F/G_<ts>.inp（純 UTF-8，英文注記）
+#        - RI_CLPM_A~D_<ts>.inp
+#        - 若已安裝 Mplus：.out 檔會自動產生，Excel 內數字會填入（含 MI）
 #        - 若未安裝 Mplus：Excel 欄位顯示「（尚未執行）」，手動執行 .inp 後可重跑 pipeline
 #   3. 確認 SPSS .sps 語法在 SPSS 中可正常執行（所有 * 行結尾有句點）
-#   4. 若另一台電腦有編碼問題，改用 _b5.inp 版本開啟
 #
 # ==========================================
+
+# ==========================================
+# MODULE H: 兩版本比較報告
+# ==========================================
+def generate_comparison_excel(run_dir, ts, all_results):
+    """
+    產生 Comparison_{ts}.xlsx：WithPP vs NoPP 路徑係數並排比較 + 模型適配。
+    """
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    except ImportError:
+        print("  [警告] 未安裝 openpyxl，跳過比較 Excel。")
+        return None
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "兩版本比較"
+
+    thin = Side(border_style="thin", color="000000")
+    bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
+    hdr_fill = PatternFill("solid", fgColor="4472C4")
+    nopp_fill = PatternFill("solid", fgColor="FCE4D6")
+    wpp_fill  = PatternFill("solid", fgColor="E2EFDA")
+    ctr = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    lft = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+
+    def _hdr(row, col, val):
+        c = ws.cell(row=row, column=col, value=val)
+        c.font = Font(bold=True, color="FFFFFF", size=10)
+        c.fill = hdr_fill; c.alignment = ctr; c.border = bdr
+
+    def _cell(row, col, val, bold=False, fill=None):
+        c = ws.cell(row=row, column=col, value=val)
+        c.font = Font(bold=bold, size=10)
+        c.alignment = ctr; c.border = bdr
+        if fill: c.fill = fill
+        return c
+
+    def _fmt(d, key='est'):
+        v = d.get(key, float('nan')) if d else float('nan')
+        try:
+            return f"{v:.3f}" if v == v else '—'
+        except Exception:
+            return '—'
+
+    def _ci_str(d):
+        if not d: return '—'
+        lo, hi = d.get('ci_lo', float('nan')), d.get('ci_hi', float('nan'))
+        try:
+            return f"[{lo:.3f}, {hi:.3f}]" if (lo == lo and hi == hi) else '—'
+        except Exception:
+            return '—'
+
+    r = 1
+    ws.cell(row=r, column=1,
+            value=f"WithPP vs NoPP 兩版本路徑係數比較（{ts}）"
+            ).font = Font(bold=True, size=13)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    r += 1
+
+    # ── 適配指數比較 ──────────────────────────────────────────────
+    sec = ws.cell(row=r, column=1, value="模型適配指數比較")
+    sec.font = Font(bold=True, size=11, color="FFFFFF")
+    sec.fill = PatternFill("solid", fgColor="2E4057")
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    r += 1
+    for ci, h in enumerate(["版本", "模型", "CFI", "RMSEA", "SRMR", "AIC", "BIC", "備注"], 1):
+        _hdr(r, ci, h)
+    r += 1
+
+    def _fit_row(label, version, res, fill):
+        fit = res.get('fit', {}) if res else {}
+        def _f(k):
+            v = fit.get(k, float('nan'))
+            try: return f"{v:.3f}" if v == v else '—'
+            except: return '—'
+        for ci, v in enumerate([version, label,
+                                 _f('cfi'), _f('rmsea'), _f('srmr'),
+                                 f"{fit.get('aic',float('nan')):.1f}" if fit.get('aic') else '—',
+                                 f"{fit.get('bic',float('nan')):.1f}" if fit.get('bic') else '—',
+                                 ''], 1):
+            _cell(r, ci, v, fill=fill)
+
+    _fit_row('PATH: JCP/HP/PP(T1)→DP(T2)→CI(T3)', 'WithPP',
+             all_results.get('PATH (T1→T2→T3)', {}), wpp_fill)
+    r += 1
+    _fit_row('PATH_NoPP: JCP/HP(T1)→DP(T2)→CI(T3)', 'NoPP',
+             all_results.get('PATH_NoPP', {}), nopp_fill)
+    r += 2
+
+    # ── 路徑係數並排比較 ──────────────────────────────────────────
+    sec2 = ws.cell(row=r, column=1, value="主路徑係數並排比較（STDYX 標準化 β）")
+    sec2.font = Font(bold=True, size=11, color="FFFFFF")
+    sec2.fill = PatternFill("solid", fgColor="4472C4")
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    r += 1
+    for ci, h in enumerate(["路徑", "對應假設",
+                             "WithPP β", "WithPP CI",
+                             "NoPP β",  "NoPP CI",
+                             "方向一致？", "備注"], 1):
+        _hdr(r, ci, h)
+    r += 1
+
+    pm   = all_results.get('PATH (T1→T2→T3)', {})
+    npm  = all_results.get('PATH_NoPP', {})
+    pm_p = pm.get('paths', {})
+    np_p = npm.get('paths', {})
+
+    comparisons = [
+        ("JCP(T1)→DP(T2)", "H1a",
+         pm_p.get('H1a: JCP(T1)→DP(T2) [at mean PP]', {}),
+         np_p.get('H1a: JCP(T1)→DP(T2)', {})),
+        ("HP(T1)→DP(T2)", "H1b",
+         pm_p.get('H1b: HP(T1)→DP(T2) [at mean PP]', {}),
+         np_p.get('H1b: HP(T1)→DP(T2)', {})),
+        ("DP(T2)→CI(T3)", "H3/H2",
+         pm_p.get('H3:  DP(T2)→CI(T3) [at mean PP]', {}),
+         np_p.get('H2: DP(T2)→CI(T3)', {})),
+        ("JCP(T1)→CI(T3) 直接", "H5a/H3a",
+         pm_p.get('H5a: JCP(T1)→CI(T3) [at mean PP]', {}),
+         np_p.get('H3a: JCP(T1)→CI(T3) 直接', {})),
+        ("HP(T1)→CI(T3) 直接", "H5b/H3b",
+         pm_p.get('H5b: HP(T1)→CI(T3) [at mean PP]', {}),
+         np_p.get('H3b: HP(T1)→CI(T3) 直接', {})),
+    ]
+
+    pm_mc = pm.get('modconstr', {})
+    np_mc = npm.get('modconstr', {})
+    indirect_comparisons = [
+        ("JCP→DP→CI 間接", "H7a(mean)/H4a",
+         pm_mc.get('IND_HI_J', {}), np_mc.get('IND_JCP', {})),
+        ("HP→DP→CI 間接", "H7b(mean)/H4b",
+         pm_mc.get('IND_HI_H', {}), np_mc.get('IND_HP', {})),
+    ]
+
+    def _sign(d):
+        e = d.get('est', float('nan')) if d else float('nan')
+        try: return '+' if e > 0 else ('-' if e < 0 else '0')
+        except: return '?'
+
+    for path, hyp, wpp_d, npp_d in comparisons:
+        w_sign = _sign(wpp_d); n_sign = _sign(npp_d)
+        consistent = '✓' if w_sign == n_sign and w_sign != '?' else '△' if not wpp_d or not npp_d else '✗'
+        fill = wpp_fill if consistent == '✓' else (PatternFill("solid", fgColor="FFE0E0") if consistent == '✗' else None)
+        for ci, v in enumerate([path, hyp, _fmt(wpp_d), _ci_str(wpp_d),
+                                 _fmt(npp_d), _ci_str(npp_d), consistent, ''], 1):
+            _cell(r, ci, v, fill=fill)
+        r += 1
+
+    r += 1
+    note = ws.cell(row=r, column=1, value="間接效果（間接路徑 Bootstrap）")
+    note.font = Font(bold=True, size=10); note.border = bdr
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    r += 1
+    for path, hyp, wpp_d, npp_d in indirect_comparisons:
+        w_sign = _sign(wpp_d); n_sign = _sign(npp_d)
+        consistent = '✓' if w_sign == n_sign and w_sign != '?' else '△'
+        fill = wpp_fill if consistent == '✓' else None
+        for ci, v in enumerate([path, hyp, _fmt(wpp_d), _ci_str(wpp_d),
+                                 _fmt(npp_d), _ci_str(npp_d), consistent, ''], 1):
+            _cell(r, ci, v, fill=fill)
+        r += 1
+
+    ws.column_dimensions['A'].width = 26
+    ws.column_dimensions['B'].width = 14
+    ws.column_dimensions['C'].width = 12
+    ws.column_dimensions['D'].width = 22
+    ws.column_dimensions['E'].width = 12
+    ws.column_dimensions['F'].width = 22
+    ws.column_dimensions['G'].width = 12
+    ws.column_dimensions['H'].width = 14
+
+    out_path = os.path.join(run_dir, f"Comparison_{ts}.xlsx")
+    try:
+        wb.save(out_path)
+        print(f"  [OK] Comparison Excel 已儲存：{out_path}")
+    except Exception as e:
+        print(f"  [錯誤] Comparison Excel 儲存失敗：{e}")
+        return None
+    return out_path
+
+
+def generate_comparison_md(run_dir, ts, all_results):
+    """
+    產生 Comparison_{ts}.md：兩版本差異敘述。
+    """
+    lines = []
+    A = lines.append
+
+    def _v(d, k='est'):
+        v = d.get(k, float('nan')) if d else float('nan')
+        try: return f"{v:.3f}" if v == v else '—'
+        except: return '—'
+
+    def _ci(d):
+        if not d: return '—'
+        lo, hi = d.get('ci_lo', float('nan')), d.get('ci_hi', float('nan'))
+        try: return f"[{lo:.3f}, {hi:.3f}]" if (lo == lo and hi == hi) else '—'
+        except: return '—'
+
+    pm   = all_results.get('PATH (T1→T2→T3)', {})
+    npm  = all_results.get('PATH_NoPP', {})
+    pm_p = pm.get('paths', {})
+    np_p = npm.get('paths', {})
+    pm_mc = pm.get('modconstr', {})
+    np_mc = npm.get('modconstr', {})
+
+    A(f"# WithPP vs NoPP 兩版本結果比較（{ts}）")
+    A("")
+    A("> WithPP = 完整調節中介模型（PP 調節 a/b/c' 三條路徑）")
+    A("> NoPP = 純中介模型（移除 PP 所有相關分析）")
+    A("")
+    A("---")
+    A("")
+    A("## 一、模型適配比較")
+    A("")
+    A("| 版本 | 模型 | CFI | RMSEA | SRMR | AIC | BIC |")
+    A("|------|------|-----|-------|------|-----|-----|")
+
+    def _fit_row_md(label, version, res):
+        fit = res.get('fit', {}) if res else {}
+        def _f(k):
+            v = fit.get(k, float('nan'))
+            try: return f"{v:.3f}" if v == v else '—'
+            except: return '—'
+        aic = fit.get('aic', float('nan'))
+        bic = fit.get('bic', float('nan'))
+        try: aic_s = f"{aic:.1f}" if aic == aic else '—'
+        except: aic_s = '—'
+        try: bic_s = f"{bic:.1f}" if bic == bic else '—'
+        except: bic_s = '—'
+        A(f"| {version} | {label} | {_f('cfi')} | {_f('rmsea')} | {_f('srmr')} | {aic_s} | {bic_s} |")
+
+    _fit_row_md('PATH_ModMed', 'WithPP', pm)
+    _fit_row_md('PATH_NoPP',   'NoPP',   npm)
+    A("")
+    A("---")
+    A("")
+    A("## 二、主路徑係數並排比較")
+    A("")
+    A("| 路徑 | 對應假設 | WithPP β | WithPP CI | NoPP β | NoPP CI | 方向一致？ |")
+    A("|------|----------|----------|-----------|--------|---------|-----------|")
+
+    rows = [
+        ("JCP(T1)→DP(T2)", "H1a",
+         pm_p.get('H1a: JCP(T1)→DP(T2) [at mean PP]', {}),
+         np_p.get('H1a: JCP(T1)→DP(T2)', {})),
+        ("HP(T1)→DP(T2)", "H1b",
+         pm_p.get('H1b: HP(T1)→DP(T2) [at mean PP]', {}),
+         np_p.get('H1b: HP(T1)→DP(T2)', {})),
+        ("DP(T2)→CI(T3)", "H3/H2",
+         pm_p.get('H3:  DP(T2)→CI(T3) [at mean PP]', {}),
+         np_p.get('H2: DP(T2)→CI(T3)', {})),
+        ("JCP(T1)→CI(T3) 直接", "H5a/H3a",
+         pm_p.get('H5a: JCP(T1)→CI(T3) [at mean PP]', {}),
+         np_p.get('H3a: JCP(T1)→CI(T3) 直接', {})),
+        ("HP(T1)→CI(T3) 直接", "H5b/H3b",
+         pm_p.get('H5b: HP(T1)→CI(T3) [at mean PP]', {}),
+         np_p.get('H3b: HP(T1)→CI(T3) 直接', {})),
+    ]
+    for path, hyp, wd, nd in rows:
+        we, ne = wd.get('est', float('nan')) if wd else float('nan'), nd.get('est', float('nan')) if nd else float('nan')
+        try: consistent = '✓' if (we > 0) == (ne > 0) else '✗'
+        except: consistent = '?'
+        A(f"| {path} | {hyp} | {_v(wd)} | {_ci(wd)} | {_v(nd)} | {_ci(nd)} | {consistent} |")
+
+    A("")
+    A("## 三、間接效果比較")
+    A("")
+    A("| 路徑 | WithPP（at mean PP） β | WithPP CI | NoPP β | NoPP CI |")
+    A("|------|----------------------|-----------|--------|---------|")
+    A(f"| JCP→DP→CI | {_v(pm_mc.get('IND_HI_J',{}))} | {_ci(pm_mc.get('IND_HI_J',{}))} | {_v(np_mc.get('IND_JCP',{}))} | {_ci(np_mc.get('IND_JCP',{}))} |")
+    A(f"| HP→DP→CI | {_v(pm_mc.get('IND_HI_H',{}))} | {_ci(pm_mc.get('IND_HI_H',{}))} | {_v(np_mc.get('IND_HP',{}))} | {_ci(np_mc.get('IND_HP',{}))} |")
+    A("")
+    A("---")
+    A("")
+    A("## 四、WithPP 版本獨有結果（PP 調節效果）")
+    A("")
+    A("| 假設 | 路徑 | β | CI | 說明 |")
+    A("|------|------|---|-----|------|")
+    for hyp, key in [
+        ("H2a", "H2a: PP×JCP→DP (moderation)"),
+        ("H2b", "H2b: PP×HP→DP (moderation)"),
+        ("H4",  "H4:  PP×DP→CI (moderation)"),
+        ("H6a", "H6a: PP×JCP→CI (moderation)"),
+        ("H6b", "H6b: PP×HP→CI (moderation)"),
+    ]:
+        d = pm_p.get(key, {})
+        A(f"| {hyp} | {key} | {_v(d)} | {_ci(d)} | 僅 WithPP 版本 |")
+    A("")
+    A(f"*此比較摘要依據 {ts} pipeline 輸出*")
+
+    content = "\n".join(lines)
+    out_path = os.path.join(run_dir, f"Comparison_{ts}.md")
+    with open(out_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print(f"  [OK] Comparison MD: {out_path}")
+    return out_path
+
 
 # ==========================================
 # 3. MAIN PIPELINE
@@ -4480,518 +6597,44 @@ def main():
     with open(spss_analysis_path, 'w', encoding='utf-8-sig') as f:
         f.write(spss_analysis_syntax)
 
-    # === 產出 R 語法檔 (單一 CP 合併版) ===
-    r_script_content = generate_r_script(analysis_filename)
-    r_script_path = os.path.join(run_dir, f"RICLPM_Master_{ts}.R")
-    with open(r_script_path, 'w', encoding='utf-8') as f:
-        f.write(r_script_content)
-
-    # === 產出 R 語法檔 (HP & JCP 拆分版) ===
-    split_script_content = generate_r_script_split_cp(analysis_filename)
-    split_script_path = os.path.join(run_dir, f"RICLPM_SplitCP_{ts}.R")
-    with open(split_script_path, 'w', encoding='utf-8') as f:
-        f.write(split_script_content)
-
     # === 產出 Mplus .dat 資料檔（含控制變數）===
     g3_sample_full = merged_df[merged_df['Group'] == 3].copy() if 'Group' in merged_df.columns else merged_df.dropna(subset=['HP_T3','DP_T3','CI_T3']).copy()
     mplus_dat_path, mplus_dat_filename = generate_mplus_dat(g3_sample_full, run_dir, ts)
 
     # === 產出 CFA 用 dat（T1 原始題目）===
     cfa_dat_path, cfa_dat_filename = generate_cfa_dat(g3_sample_full, run_dir, ts)
+    # === 產出 CFA-H 用 dat（跨波次：HP/JCP/PP@T1，DP@T2，CI@T3）===
+    cfa_h_dat_path, cfa_h_dat_filename = generate_cfa_h_dat(g3_sample_full, run_dir, ts)
 
-    # === 執行 Mplus 模型 A-D（CFA + RI-CLPM）並解析結果 ===
-    print("[Mplus] 生成並自動執行所有 CFA/RI-CLPM 模型...")
+    # === Phase 1: 生成所有 .inp 並執行 CFA（論文順序：CFA → MI）===
+    print("[Mplus] 生成所有 Mplus .inp 並執行 CFA 模型...")
     all_mplus_results, all_inp_list = run_and_parse_all_models(
-        run_dir, mplus_dat_filename, cfa_dat_filename, ts)
-
-    # M1/M2/M3 已整合進 run_and_parse_all_models 的 cfa_models dict，
-    # 由 all_inp_list 統一列印，此處無需重複生成。
+        run_dir, mplus_dat_filename, cfa_dat_filename, ts, phases=['cfa'],
+        cfa_h_dat_filename=cfa_h_dat_filename)
     cfa_paths = []  # 保留空串列供相容舊參照
 
-    # === 產出測量不變性 6 個 .inp 檔（Model A/B × Step 1/2/3）===
-    print("[MI] 產出測量不變性 .inp 語法檔...")
-    generate_mi_inp_files(g3_sample_full, run_dir, ts)
-
-    # === 自動執行 MI 並解析結果 ===
-    print("[MI] 自動執行測量不變性分析...")
-    mi_results = run_and_parse_mi(run_dir, ts)
-
-    # === 產出舊版 Mplus 測量恆等性模板（保留供參考）===
-    mplus_mi_content = generate_mplus_measurement_invariance(mplus_dat_filename, ts)
-    mplus_mi_path = os.path.join(run_dir, f"MI_Configural_Template_{ts}.inp")
-    with open(mplus_mi_path, 'w', encoding='utf-8') as f:
-        f.write(mplus_mi_content)
-
-    # === 產出 Excel 綜合報告 ===
-    print("[Excel] 產生 Excel 綜合報告...")
-    excel_path = generate_excel_report(
+    # === 產出 Excel 綜合報告（NoPP 純中介版本，主要輸出）===
+    print("[Excel] 產生縱貫中介 Excel 綜合報告...")
+    excel_nopp_path = generate_excel_report(
         run_dir, ts, g3_sample_full, alpha_dict, corr_dict, all_mplus_results,
-        mi_results=mi_results)
+        variant_label='nopp')
+
+    # === 產出完整分析報告 .md（NoPP）===
+    print("[MD] 產生縱貫中介完整分析報告...")
+    report_nopp_path = generate_analysis_summary_md(
+        run_dir, ts, g3_sample_full, alpha_dict, corr_dict,
+        all_mplus_results, attrition_md, desc_md, variant='nopp')
+
+    # [PP 調節中介已停用] WithPP 版本 Excel 與比較報告不再產出
+    excel_path = None
+    report_path = None
+    comparison_excel_path = None
+    comparison_md_path = None
 
-    # === 產出三階段 Mplus .inp 語法檔 ===
-    mplus_steps = [
-        (generate_mplus_step1, f"RI_CLPM_Step1_CP_DP_CI_{ts}.inp",   "Step1 主路徑 CP->DP->CI"),
-        (generate_mplus_step2, f"RI_CLPM_Step2_Add_PP_{ts}.inp",      "Step2 加入 PP（H8）"),
-        (generate_mplus_step3, f"RI_CLPM_Step3_Controls_{ts}.inp",    "Step3 加入控制變數"),
-    ]
-    mplus_inp_paths = []
-    for gen_fn, fname, label in mplus_steps:
-        content = gen_fn(mplus_dat_filename, ts)
-        fpath = os.path.join(run_dir, fname)
-        with open(fpath, 'w', encoding='utf-8') as f:
-            f.write(content)
-        mplus_inp_paths.append((label, fpath))
-
-    riclpm_info_md = (
-        f"\n## 4. 信效度分析語法\n\n"
-        f"| 工具 | 分析目的 | 檔案 |\n"
-        f"|---|---|---|\n"
-        f"| SPSS | 匯入資料 + 變數標籤 | `SPSS_Syntax_{ts}.sps` |\n"
-        f"| SPSS | **完整分析**（描述統計/相關/CMV/CITC/t檢定）| `SPSS_Analysis_{ts}.sps` |\n"
-        f"| SPSS | 完整分析（含詳細信度/題目間相關）| `SPSS_Analysis_{ts}.sps` |\n"
-        f"| Mplus | **M1** 五因子 CFA（HP/JCP/PP/DP/CI）| `CFA_M1_FiveFactor_{ts}.inp` |\n"
-        f"| Mplus | **M2** 四因子 CFA（CP合併/PP/DP/CI）| `CFA_M2_FourFactor_CP_merged_{ts}.inp` |\n"
-        f"| Mplus | **M3** 三因子 CFA（CP/DP/CI 主路徑）| `CFA_M3_ThreeFactor_CP_DP_CI_{ts}.inp` |\n"
-        f"| Mplus | 測量恆等性模板 | `MI_Configural_Template_{ts}.inp` |\n"
-        f"\n## 5. RI-CLPM 動態模型分析\n\n已自動產生分析腳本：\n"
-        f"1. **R 單一 CP 合併版**：`{r_script_path}`\n"
-        f"2. **R HP & JCP 拆分版**：`{split_script_path}`\n"
-        f"3. **Mplus parcel 資料檔（RI-CLPM 用）**：`{mplus_dat_path}`\n"
-        f"4. **Mplus CFA 資料檔（原始題目 T1）**：`{cfa_dat_path}`\n"
-        + "".join(f"{i+5}. **Mplus {label}**：`{p}`\n"
-                  for i, (label, p) in enumerate(mplus_inp_paths))
-        + f"\n> 建議執行順序：\n"
-          f"> 1. SPSS_Syntax 匯入資料 → 2. SPSS_Analysis 完整 SPSS 分析\n"
-          f"> 3. Mplus CFA_FiveFactor 量測模型 → 4. MI 測量恆等性\n"
-          f"> 5. Mplus RI-CLPM A/B（H1-H7）→ 6. RI-CLPM C1/C2/D1/D2（H8 子群）\n"
-    )
-    report_content = f"# 全階段資料分析自動化整合報告 (產生時間: {ts})\n\n" + attrition_md + desc_md + riclpm_info_md
-
-    report_path = os.path.join(run_dir, f"Pipeline_Master_Report_{ts}.md")
-    with open(report_path, 'w', encoding='utf-8') as f:
-        f.write(report_content)
-        
-    # ── 動態計算 draft 所需數值 ──────────────────────────────
-    n_t1_raw      = tracking.get('T1_Raw', 'N/A')
-    n_t1_attn_out = (tracking.get('T1_Raw', 0) - tracking.get('T1_Pass_Attn', 0))
-    n_t1_job      = tracking.get('T1_Pass_Job', 'N/A')
-    n_t1_eff      = len(merged_df)                   # 去重後 T1 有效人數
-    n_t2_raw      = tracking.get('T2_Raw', 'N/A')
-    n_t2_attn_out = (tracking.get('T2_Raw', 0) - tracking.get('T2_Pass_Attn', 0))
-    n_t2_matched  = tracking.get('T2_Matched', 'N/A')
-    n_t3_raw      = tracking.get('T3_Raw', 'N/A')
-    n_t3_attn_out = (tracking.get('T3_Raw', 0) - tracking.get('T3_Pass_Attn', 0))
-    n_t3_final    = tracking.get('T3_Matched', len(g3_sample))  # 最終有效樣本
-
-    # 各量表 α
-    def _afmt(key):
-        v = alpha_dict.get(key, np.nan)
-        return f"{v:.3f}" if not np.isnan(v) else "N/A"
-    alpha_min_val = min((v for v in alpha_dict.values() if not np.isnan(v)), default=np.nan)
-    alpha_max_val = max((v for v in alpha_dict.values() if not np.isnan(v)), default=np.nan)
-    alpha_range   = (f"{alpha_min_val:.2f} 至 {alpha_max_val:.2f}"
-                     if not np.isnan(alpha_min_val) else "N/A")
-
-    # 關鍵相關係數
-    def _rfmt(key):
-        d = corr_dict.get(key, {})
-        r, p = d.get('r', np.nan), d.get('p', np.nan)
-        if np.isnan(r): return "r = N/A"
-        # TODO-1: 改用 fmt_p() 取代此處的 (ns)，範例如下：
-        #   star, p_str = fmt_p(p)
-        #   return f"r = {r:.2f}{star}（{p_str}）"
-        star = '***' if p < .001 else '**' if p < .01 else '*' if p < .05 else '(ns)'
-        return f"r = {r:.2f}{star}"
-
-    def _ffmt(d, key, dec=3):
-        try:
-            v = float(d.get(key, float('nan')))
-        except (TypeError, ValueError):
-            return '—'
-        if np.isnan(v): return '—'
-        return f"{v:.{dec}f}"
-
-    def _pfmt(path_d):
-        if not path_d: return '—', '—', '—'
-        try:
-            est = float(path_d.get('est', float('nan')))
-            se  = float(path_d.get('se',  float('nan')))
-            p   = float(path_d.get('p',   float('nan')))
-        except (TypeError, ValueError):
-            return '—', '—', '—'
-        if np.isnan(est): return '—', '—', '—'
-        star = '***' if p < .001 else '**' if p < .01 else '*' if p < .05 else ''
-        return f"{est:.3f}{star}", f"{se:.3f}", f"{p:.3f}"
-
-    def _prow(label, paths_d, key):
-        b, se, p = _pfmt(paths_d.get(key, {}))
-        return f"| {label} | {b} | {se} | {p} |"
-
-    # ANOVA 流失分析結論（依 p 值動態產生文字）
-    psych_vars = ['_CP_T1', '_DP_T1', '_CI_T1', '_PP_T1']
-    psych_nonsig = all(anova_stats.get(v, {}).get('p', 1) > .05 for v in psych_vars if v in anova_stats)
-    demo_sig_gender = chi_stats.get('gender_p', 1) < .05
-    demo_sig_edu    = chi_stats.get('edu_p', 1) < .05
-
-    if psych_nonsig:
-        attrition_conclusion = (
-            "單因子變異數分析（ANOVA）結果顯示，三組參與者在「職涯高原」、「決策拖延」、"
-            "「職涯無所作為」與「主動型人格」等核心心理變項之基期得分上，均無顯著差異。"
-        )
-    else:
-        sig_vars = [v for v in psych_vars if anova_stats.get(v, {}).get('p', 1) <= .05]
-        attrition_conclusion = (
-            f"單因子變異數分析（ANOVA）結果顯示，三組參與者在多數核心心理變項基期得分上無顯著差異，"
-            f"惟 {', '.join(sig_vars)} 達顯著水準，分析結果請參考流失分析表格。"
-        )
-
-    demo_note_parts = []
-    if demo_sig_gender:
-        demo_note_parts.append(f"性別比例（χ²={chi_stats.get('gender_chi2', 0):.3f}, p={chi_stats.get('gender_p', 0):.3f}）")
-    if demo_sig_edu:
-        demo_note_parts.append(f"教育程度（χ²={chi_stats.get('edu_chi2', 0):.3f}, p={chi_stats.get('edu_p', 0):.3f}）")
-    demo_note = ("在" + "、".join(demo_note_parts) + "上呈現顯著差異，" if demo_note_parts else "")
-
-    # CFA/RI-CLPM 資料提取（供 .md 草稿使用）
-    _cfa_label_map = [
-        ('CFA-A (JCP+DP+CI)',                '模型1（CFA-A）'),
-        ('CFA-B (HP+DP+CI)',                 '模型2（CFA-B）'),
-        ('CFA-C (JCP+PP+DP+CI)',             '模型3（CFA-C）'),
-        ('CFA-D (HP+PP+DP+CI)',              '模型4（CFA-D）'),
-        ('CFA-M1 (HP+JCP+PP+DP+CI, 5F)',    '模型5（CFA-E）'),
-        ('CFA-M2 (CP_merged+PP+DP+CI, 4F)', '模型6（CFA-F）'),
-        ('CFA-M3 (CP_merged+DP+CI, 3F)',    '模型7（CFA-G）'),
-    ]
-    _cfa_fit_rows = []
-    for _mk, _mn in _cfa_label_map:
-        _f = all_mplus_results.get(_mk, {}).get('fit', {})
-        _cfa_fit_rows.append(
-            f"| {_mn} | {_ffmt(_f,'chi2',1)} | {_f.get('df','—')} | "
-            f"{_ffmt(_f,'cfi')} | {_ffmt(_f,'tli')} | "
-            f"{_ffmt(_f,'rmsea')} | {_ffmt(_f,'srmr')} |"
-        )
-    _cfa_fit_block = '\n'.join(_cfa_fit_rows)
-
-    _ra       = all_mplus_results.get('RI-CLPM-A (JCP, Bidirectional)', {})
-    _ra_fit   = _ra.get('fit', {})
-    _ra_paths = _ra.get('paths', {})
-    _ra_indir = _ra.get('indirect', {})
-    _rb       = all_mplus_results.get('RI-CLPM-B (HP, Bidirectional)', {})
-    _rb_fit   = _rb.get('fit', {})
-    _rb_paths = _rb.get('paths', {})
-    _rb_indir = _rb.get('indirect', {})
-
-    def _irow(label, indir_d, key):
-        d = indir_d.get(key, {})
-        if not d: return f"| {label} | — | — | — |"
-        try:
-            est  = float(d.get('est', float('nan')))
-            lo   = float(d.get('ci_lo', float('nan')))
-            hi   = float(d.get('ci_hi', float('nan')))
-            sig  = d.get('sig', False)
-        except (TypeError, ValueError):
-            return f"| {label} | — | — | — |"
-        if np.isnan(est): return f"| {label} | — | — | — |"
-        sig_mark = '✓' if sig else '✗'
-        return f"| {label} | {est:.3f} | [{lo:.3f}, {hi:.3f}] | {sig_mark} |"
-
-    # Generate Thesis Draft
-    thesis_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for f in os.listdir(thesis_dir):
-        if f.startswith("thesis_analysis_draft_") and f.endswith(".md"):
-            try: os.remove(os.path.join(thesis_dir, f))
-            except: pass
-
-    # ── 樣本背景統計（供表1）─────────────────────────────────
-    _df_g3 = g3_sample_full.copy()
-    _n_g3  = len(_df_g3)
-    def _demo_pct(col, val):
-        s = pd.to_numeric(_df_g3.get(col, pd.Series(dtype=float)), errors='coerce')
-        cnt = int((s == val).sum())
-        pct = cnt / _n_g3 * 100 if _n_g3 > 0 else 0
-        return cnt, pct
-    def _demo_msd(col):
-        s = pd.to_numeric(_df_g3.get(col, pd.Series(dtype=float)), errors='coerce').dropna()
-        return (round(float(s.mean()), 1), round(float(s.std()), 1)) if len(s) > 0 else ('N/A', 'N/A')
-    _gender_m_n,  _gender_m_p  = _demo_pct('Gender', 1)
-    _gender_f_n,  _gender_f_p  = _demo_pct('Gender', 2)
-    _edu_bach_n,  _edu_bach_p  = _demo_pct('Education', 3)
-    _edu_mast_n,  _edu_mast_p  = _demo_pct('Education', 4)
-    _age_m, _age_sd = _demo_msd('Age')
-
-    # ── AVE/CR 供表3、表5 ────────────────────────────────────
-    _ave_cr = all_mplus_results.get('CFA-M1 (HP+JCP+PP+DP+CI, 5F)', {}).get('ave_cr', {})
-    def _ave_cr_row(fac):
-        d = _ave_cr.get(fac, {})
-        lams = d.get('loadings', [])
-        ave  = d.get('AVE', float('nan'))
-        cr   = d.get('CR',  float('nan'))
-        lr   = f"{min(lams):.3f}~{max(lams):.3f}" if lams else '—'
-        ave_s = f"{ave:.3f}" if not np.isnan(ave) else '—'
-        cr_s  = f"{cr:.3f}"  if not np.isnan(cr)  else '—'
-        ok = (not np.isnan(ave) and not np.isnan(cr) and ave >= .50 and cr >= .70)
-        return f"| {fac} | {d.get('n_items', '—')} | {lr} | {ave_s} | {cr_s} | {'✓' if ok else '✗'} |"
-
-    # ── CFA 因素負荷量（表3，CFA-E）────────────────────────────
-    _m1_loadings = all_mplus_results.get('CFA-M1 (HP+JCP+PP+DP+CI, 5F)', {}).get('loadings', [])
-    _loading_rows = []
-    _prev_fac = None
-    for _ld in _m1_loadings:
-        _f = _ld['factor']
-        if _f != _prev_fac:
-            _loading_rows.append(f"| **{_f}** | | |")
-            _prev_fac = _f
-        _star = '***' if _ld['p'] < .001 else ('**' if _ld['p'] < .01 else ('*' if _ld['p'] < .05 else ''))
-        _loading_rows.append(f"| {_f} | {_ld['item']} | {_ld['beta']:.3f}{_star} |")
-    _loading_block = '\n'.join(_loading_rows) if _loading_rows else '| （待 Mplus 執行後填入） | — | — |'
-
-    # ── RI 相關（表7）────────────────────────────────────────
-    def _ri_corr_rows(model_key):
-        ri = all_mplus_results.get(model_key, {}).get('ri_corr', {})
-        rows = []
-        for pair, d in ri.items():
-            est = d.get('est', float('nan'))
-            lo  = d.get('ci_lo', float('nan'))
-            hi  = d.get('ci_hi', float('nan'))
-            sig = d.get('sig', False)
-            est_s = f"{est:.3f}" if not np.isnan(est) else '—'
-            ci_s  = (f"[{lo:.3f}, {hi:.3f}]"
-                     if not (np.isnan(lo) or np.isnan(hi)) else '—')
-            rows.append(f"| {pair} | {est_s} | {ci_s} | {'✓' if sig else '✗'} |")
-        return '\n'.join(rows) if rows else '| （待執行） | — | — | — |'
-
-    # ── MI 結果（表8）───────────────────────────────────────
-    def _mi_rows(mi_path_label):
-        rows_mi = []
-        for step_d in (mi_results or {}).get(mi_path_label, []):
-            chi2_s = f"{step_d['chi2']:.2f}" if isinstance(step_d.get('chi2'), float) else '—'
-            cfi_s  = f"{step_d['cfi']:.3f}"  if isinstance(step_d.get('cfi'),  float) else '—'
-            rm_s   = f"{step_d['rmsea']:.3f}" if isinstance(step_d.get('rmsea'), float) else '—'
-            dc_s   = f"{step_d['d_cfi']:.3f}"   if isinstance(step_d.get('d_cfi'),   float) else '—'
-            dr_s   = f"{step_d['d_rmsea']:.3f}" if isinstance(step_d.get('d_rmsea'), float) else '—'
-            inv_s  = ('✓' if step_d.get('invariant') is True
-                      else ('✗' if step_d.get('invariant') is False else '基準'))
-            rows_mi.append(
-                f"| {step_d['step']}：{step_d['desc']} | {chi2_s} | "
-                f"{step_d.get('df','—')} | {cfi_s} | {rm_s} | {dc_s} | {dr_s} | {inv_s} |"
-            )
-        return '\n'.join(rows_mi) if rows_mi else '| （待執行） | — | — | — | — | — | — | — |'
-
-    draft_content = f"""# 論文段落草稿（自動產生，產生時間：{ts}）
-> 本文件由 pipeline_master.py 依當次資料運算結果自動產生，所有數字皆為實際計算值。
-> RI-CLPM 係數欄位需待 Mplus 執行後填入（標記為 [待填]）。
-
----
-
-## 第三章：研究對象與研究程序
-
-### 表1：樣本背景（N = {_n_g3}）
-
-| 變項 | 類別 | 人數 | % |
-|---|---|---|---|
-| 性別 | 男 | {_gender_m_n} | {_gender_m_p:.1f}% |
-| | 女 | {_gender_f_n} | {_gender_f_p:.1f}% |
-| 教育程度 | 大學 | {_edu_bach_n} | {_edu_bach_p:.1f}% |
-| | 碩士以上 | {_edu_mast_n} | {_edu_mast_p:.1f}% |
-| 年齡 | M (SD) | {_age_m} ({_age_sd}) 歲 | — |
-
-### 樣本回收與清理
-
-本研究採縱貫性研究設計（longitudinal study），共發放三波問卷，
-各波相隔約三個月。各波段之樣本回收與清理程序如下：
-
-**第一階段（T1）**：原始回收 {n_t1_raw} 份問卷，
-扣除未通過注意力檢測之 {n_t1_attn_out} 人，
-以及不符合填寫條件（須填寫三次）與就業資格（排除兼職、待業、學生、自由工作者、自營）後，
-通過資格篩選計 {n_t1_job} 人，
-再刪除同一時點重複填答後，T1 實際有效樣本為 **{n_t1_eff} 人**。
-
-**第二階段（T2）**：原始回收 {n_t2_raw} 份問卷，
-扣除未通過注意力檢測之 {n_t2_attn_out} 人後，
-成功配對回 T1 之樣本為 **{n_t2_matched} 人**。
-
-**第三階段（T3）**：原始回收 {n_t3_raw} 份問卷，
-扣除未通過注意力檢測之 {n_t3_attn_out} 人後，
-最終成功配對回 T1、T2 之有效樣本為 **{n_t3_final} 人**（本研究主分析樣本，N = {n_t3_final}）。
-
-### 樣本流失分析（Attrition Analysis）
-
-為確認樣本流失是否造成系統性偏誤，本研究將全體 T1 有效樣本（N = {n_t1_eff}）
-依後續參與波次分為三組：
-僅完成 T1 者（Group 1, n = {merged_df['Group'].value_counts().get(1, 0)}）、
-完成 T1 與 T2 者（Group 2, n = {merged_df['Group'].value_counts().get(2, 0)}）、
-以及完成三波者（Group 3, n = {merged_df['Group'].value_counts().get(3, 0)}），
-並針對 T1 時點之主要研究變項及人口統計變項進行差異檢定。
-
-{attrition_conclusion}
-{demo_note}考量所有核心心理研究變項之基期水準皆無顯著差距，
-本研究之樣本流失情況應不至於對縱貫歷程中核心構念之發展造成系統性偏誤。
-
----
-
-## 第四章：研究結果
-
-### 表2：量表題目統計（Item-level CITC）
-
-詳見 Excel 表2（各量表題目描述統計、CITC、刪題後 α 及刪題建議）。
-
----
-
-### 表3：CFA 因素負荷量（CFA-E 五因子，T1）
-
-| 因子 | 題目 | λ (STDYX) |
-|---|---|---|
-{_loading_block}
-
-> 標準：λ ≥ .50 保留；< .40 建議刪題。
-
----
-
-### 表4：敘述統計與信度
-
-本研究各量表之 Cronbach's α（T1）如下：
-階層停滯（HP）α = {_afmt('HP')}、工作內容停滯（JCP）α = {_afmt('JCP')}、
-職涯高原合併（CP = HP + JCP，12 題）α = {_afmt('CP')}、
-主動型人格（PP）α = {_afmt('PP')}、決策拖延（DP）α = {_afmt('DP')}、
-職涯無所作為（CI）α = {_afmt('CI')}。
-各量表信度均達 .70 以上學術標準（範圍 {alpha_range}），顯示測量工具具備良好之內部一致性。
-
----
-
-### 表5：CFA 適配指數
-
-| 模型 | χ² | df | CFI | TLI | RMSEA | SRMR |
-|---|---|---|---|---|---|---|
-{_cfa_fit_block}
-
-> 配適度標準：CFI ≥ .90，TLI ≥ .90，RMSEA ≤ .08，SRMR ≤ .08。
-
-#### 表5b：聚合效度指標（CFA-E 五因子，T1）
-
-| 因子 | 題數 | λ 範圍 | AVE | CR | 通過（AVE≥.50 & CR≥.70）|
-|---|---|---|---|---|---|
-{_ave_cr_row('HP')}
-{_ave_cr_row('JCP')}
-{_ave_cr_row('PP')}
-{_ave_cr_row('DP')}
-{_ave_cr_row('CI')}
-
----
-
-### 表6：相關矩陣（T1，N = {len(g3_sample)}）
-
-相關分析結果（T1）顯示：
-- CP（職涯高原）與 CI（職涯無所作為）：{_rfmt('CP_CI')}
-- CP（職涯高原）與 DP（決策拖延）：{_rfmt('CP_DP')}
-- DP（決策拖延）與 CI（職涯無所作為）：{_rfmt('DP_CI')}
-- PP（主動型人格）與 DP（決策拖延）：{_rfmt('PP_DP')}
-- PP（主動型人格）與 CI（職涯無所作為）：{_rfmt('PP_CI')}
-
-（詳細相關矩陣見 Excel 表6）
-
----
-
-### 表7：RI-CLPM Between-person 隨機截距相關
-
-#### 模型 A（JCP 路徑）
-
-| 變數對 | r 估計 | 95% CI | 顯著 |
-|---|---|---|---|
-{_ri_corr_rows('RI-CLPM-A (JCP, Bidirectional)')}
-
-#### 模型 B（HP 路徑）
-
-| 變數對 | r 估計 | 95% CI | 顯著 |
-|---|---|---|---|
-{_ri_corr_rows('RI-CLPM-B (HP, Bidirectional)')}
-
----
-
-### 表8：RI-CLPM 動態模型分析結果
-
-#### 模型 A（CP 指標 = JCP 工作內容停滯）
-
-**模型適配**：χ²(df={_ra_fit.get('df','—')})={_ffmt(_ra_fit,'chi2',1)}, CFI={_ffmt(_ra_fit,'cfi')}, TLI={_ffmt(_ra_fit,'tli')}, RMSEA={_ffmt(_ra_fit,'rmsea')}, SRMR={_ffmt(_ra_fit,'srmr')}
-
-| 路徑（假設） | β（標準化） | SE | p |
-|---|---|---|---|
-{_prow('H1a: JCP(t)→DP(t+1)', _ra_paths, 'H1a: JCP→DP')}
-{_prow('H2a: JCP(t)→CI(t+1)', _ra_paths, 'H2a: JCP→CI')}
-{_prow('H3: DP(t)→CI(t+1)',   _ra_paths, 'H3:  DP→CI')}
-{_prow('H4a（反向）: DP(t)→JCP(t+1)', _ra_paths, 'H4a: DP→JCP')}
-{_prow('H5（反向）: CI(t)→DP(t+1)',   _ra_paths, 'H5:  CI→DP')}
-{_prow('H6a（反向）: CI(t)→JCP(t+1)', _ra_paths, 'H6a: CI→JCP')}
-
-#### 模型 B（CP 指標 = HP 階層停滯）
-
-**模型適配**：χ²(df={_rb_fit.get('df','—')})={_ffmt(_rb_fit,'chi2',1)}, CFI={_ffmt(_rb_fit,'cfi')}, TLI={_ffmt(_rb_fit,'tli')}, RMSEA={_ffmt(_rb_fit,'rmsea')}, SRMR={_ffmt(_rb_fit,'srmr')}
-
-| 路徑（假設） | β（標準化） | SE | p |
-|---|---|---|---|
-{_prow('H1b: HP(t)→DP(t+1)',  _rb_paths, 'H1b: HP→DP')}
-{_prow('H2b: HP(t)→CI(t+1)',  _rb_paths, 'H2b: HP→CI')}
-{_prow('H3: DP(t)→CI(t+1)',   _rb_paths, 'H3:  DP→CI')}
-{_prow('H4b（反向）: DP(t)→HP(t+1)', _rb_paths, 'H4b: DP→HP')}
-{_prow('H5（反向）: CI(t)→DP(t+1)',  _rb_paths, 'H5:  CI→DP')}
-{_prow('H6b（反向）: CI(t)→HP(t+1)', _rb_paths, 'H6b: CI→HP')}
-
-#### 測量不變性（MI）
-
-**MI-A（JCP 路徑）**
-
-| 步驟 | χ² | df | CFI | RMSEA | ΔCFI | ΔRMSEA | 不變性 |
-|---|---|---|---|---|---|---|---|
-{_mi_rows('A (JCP路徑)')}
-
-**MI-B（HP 路徑）**
-
-| 步驟 | χ² | df | CFI | RMSEA | ΔCFI | ΔRMSEA | 不變性 |
-|---|---|---|---|---|---|---|---|
-{_mi_rows('B (HP路徑)')}
-
-> 判斷標準：|ΔCFI| < .01 且 |ΔRMSEA| < .015（Cheung & Rensvold, 2002）
-
----
-
-### 表9：路徑係數
-
-（詳見 Excel 表9 RI-CLPM 路徑係數完整表）
-
----
-
-### 表10：H7 中介效果
-
-**中介效果 H7a（JCP→DP→CI，Bootstrap 95% CI）**
-
-| 路徑 | 間接效果 β | 95% CI | 顯著 |
-|---|---|---|---|
-{_irow('H7a: JCP→DP→CI', _ra_indir, 'H7a: JCP→DP→CI')}
-
-**中介效果 H7b（HP→DP→CI，Bootstrap 95% CI）**
-
-| 路徑 | 間接效果 β | 95% CI | 顯著 |
-|---|---|---|---|
-{_irow('H7b: HP→DP→CI', _rb_indir, 'H7b: HP→DP→CI')}
-
----
-
-### 分析語法
-
-詳見 Excel 表11（SPSS 語法）與表12（Mplus 語法）。
-
----
-*（本檔案由 pipeline_master.py 於 {ts} 自動產生，N = {n_t3_final}）*
-"""
-
-    draft_path = os.path.join(thesis_dir, f"thesis_analysis_draft_v{ts}.md")
-    with open(draft_path, 'w', encoding='utf-8') as f:
-        f.write(draft_content)
-        
     print(f"[OK] Pipeline Completed!")
-    print(f"   - Report           : {report_path}")
-    print(f"   - Thesis Draft     : {draft_path}")
-    if excel_path:
-        print(f"   - Excel 報告       : {excel_path}")
+    print(f"   - Report           : {report_nopp_path}")
+    if excel_nopp_path:
+        print(f"   - Excel            : {excel_nopp_path}")
     for label, inp_p in all_inp_list:
         print(f"   - Mplus (新) {label}: {os.path.basename(inp_p)}")
     print(f"   - Analysis Data    : {analysis_path}")
@@ -4999,49 +6642,12 @@ def main():
     print(f"   - SPSS 完整分析    : {spss_analysis_path}")
     # SPSS_Reliability_*.sps 已停止輸出，詳細信度已整合至 SPSS_Analysis_*.sps
     print(f"   - Mplus CFA dat    : {cfa_dat_path}")
-    # M1/M2/M3 已整合至 all_inp_list，由上方迴圈統一列印
-    print(f"   - Mplus MI 模板    : {mplus_mi_path}")
-    print(f"   - Mplus RI-CLPM dat: {mplus_dat_path}")
-    for label, p in mplus_inp_paths:
-        print(f"   - Mplus {label}: {os.path.basename(p)}")
+    print(f"   - Mplus dat        : {mplus_dat_path}")
 
-    # ── 刪題目敏感性分析（三個變體版本）────────────────────────────
-    variants = [
-        (['JCP6'],        'noJCP6',       '刪除 JCP6'),
-        (['DP1'],         'noDP1',        '刪除 DP1'),
-        (['JCP6', 'DP1'], 'noJCP6_noDP1', '刪除 JCP6 + DP1'),
-    ]
-    for excl_items, vtag, vdesc in variants:
-        vdir = os.path.join(run_dir, f'variant_{vtag}')
-        os.makedirs(vdir, exist_ok=True)
-        print(f"\n[變體] {vdesc}（{vtag}）→ {vdir}")
-
-        v_mplus_dat_path, v_mplus_dat_fn = generate_mplus_dat(
-            g3_sample_full, vdir, ts, exclude=excl_items)
-        v_cfa_dat_path, v_cfa_dat_fn = generate_cfa_dat(
-            g3_sample_full, vdir, ts, exclude=excl_items)
-
-        print(f"[Mplus] 生成並執行 {vdesc} 版 CFA/RI-CLPM...")
-        v_results, v_inp_list = run_and_parse_all_models(
-            vdir, v_mplus_dat_fn, v_cfa_dat_fn, ts, exclude=excl_items)
-
-        # 產生 variant 專屬 SPSS 語法（刪除指定題目的 COMPUTE / RELIABILITY）
-        import shutil as _shutil
-        _shutil.copy2(os.path.join(run_dir, f"SPSS_Syntax_{ts}.sps"),
-                      os.path.join(vdir, f"SPSS_Syntax_{ts}.sps"))
-        v_spss_analysis = generate_spss_analysis_syntax(
-            analysis_path, ts, pp_median=_pp_median,
-            n_total=len(g3_sample_full), exclude=excl_items)
-        with open(os.path.join(vdir, f"SPSS_Analysis_{ts}.sps"), 'w', encoding='utf-8-sig') as _f:
-            _f.write(v_spss_analysis)
-
-        v_excel = generate_excel_report(
-            vdir, ts, g3_sample_full, alpha_dict, corr_dict, v_results,
-            variant_label=vdesc, exclude=excl_items)
-        if v_excel:
-            print(f"  [OK] 變體 Excel：{v_excel}")
-
-    print("\n--- Pipeline 全部完成（含 3 個刪題變體）---")
+    # 刪題敏感性分析已停用：實際驗證後，刪除 JCP6、DP1 或兩者後
+    # CFA-E (五因子) CFI 最高僅達 0.898，未達 .90 門檻，
+    # 故刪題對模型適配無實質改善，不納入正式分析流程。
+    print("\n--- Pipeline 完成 ---")
 
 
 if __name__ == "__main__":
